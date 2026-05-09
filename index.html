@@ -1,455 +1,444 @@
-```react
-import React, { useState, useEffect, useRef } from "react";
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged, 
-  signInWithCustomToken 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  query, 
-  addDoc, 
-  getDocs 
-} from 'firebase/firestore';
-
-// --- INITIALIZE FIREBASE (MENGGUNAKAN KONFIGURASI KAMU) ---
-const firebaseConfig = {
-  apiKey: "AIzaSyAnaxWWQRgCJ2BT2LY8quibHBPzgoUS1kE",
-  authDomain: "gsm-app-afe20.firebaseapp.com",
-  projectId: "gsm-app-afe20",
-  storageBucket: "gsm-app-afe20.firebasestorage.app",
-  messagingSenderId: "721664568589",
-  appId: "1:721664568589:web:508d22c640dcea38135444"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// ID Unik untuk membedakan data antar konter (Bisa diganti per klien)
-const appId = "SGM-PRO-KONTER-01"; 
-
-const statusColor = {
-  "Masuk": "bg-gray-200 text-gray-700",
-  "Bongkar": "bg-yellow-100 text-yellow-700",
-  "Menunggu Sparepart": "bg-orange-100 text-orange-700",
-  "Proses": "bg-blue-100 text-blue-700",
-  "Selesai": "bg-green-100 text-green-700",
-  "Sudah Diambil": "bg-teal-100 text-teal-700",
-};
-
-// --- KOMPONEN LOGO SGM ---
-const SgmLogo = ({ className = "" }) => (
-    <svg viewBox="0 0 140 40" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="sgmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#0284c7" />
-          <stop offset="50%" stopColor="#0ea5e9" />
-          <stop offset="100%" stopColor="#22d3ee" />
-        </linearGradient>
-        <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="2" dy="2" stdDeviation="2" floodOpacity="0.3"/></filter>
-      </defs>
-      <circle cx="20" cy="20" r="16" stroke="url(#sgmGrad)" strokeWidth="3" fill="none" strokeDasharray="60 20" />
-      <circle cx="20" cy="20" r="12" stroke="#0ea5e9" strokeWidth="1" fill="none" />
-      <text x="45" y="30" fontFamily="Arial, sans-serif" fontWeight="900" fontSize="32" fill="url(#sgmGrad)" fontStyle="italic" letterSpacing="-2" filter="url(#shadow)">SGM</text>
-      <path d="M 120 15 L 132 5 L 132 15 Z" fill="#0284c7"/>
-      <path d="M 105 30 L 115 15 L 125 25 L 132 15" stroke="url(#sgmGrad)" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-);
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [loadingDb, setLoadingDb] = useState(true);
-  const [role, setRole] = useState(null); 
-  const [currentUser, setCurrentUser] = useState(null); 
-  const [loginInput, setLoginInput] = useState({ id: "", pin: "" });
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loginTargetRole, setLoginTargetRole] = useState("");
-  const [adminPinDB, setAdminPinDB] = useState("konter123"); 
-
-  const [activeTab, setActiveTab] = useState("Dashboard");
-  const [services, setServices] = useState([]);
-  const [stokList, setStokList] = useState([]);
-  const [teknisiList, setTeknisiList] = useState([]); 
-  const [promoList, setPromoList] = useState([]);
-  const [activityLogs, setActivityLogs] = useState([]);
-  const [absensiLogs, setAbsensiLogs] = useState([]); 
-  const [kasirSession, setKasirSession] = useState({ isOpen: true, startTime: new Date().getTime() });
-  const [konterLocation, setKonterLocation] = useState(null); 
-  const [konterProfile, setKonterProfile] = useState({ nama: "Toko Gadget", logoUrl: "", waOwner: "", activeUntil: new Date().getTime() + 2592000000 }); 
-  
-  const [customerPhoneLogin, setCustomerPhoneLogin] = useState("");
-  const [savedCustomer, setSavedCustomer] = useState(null); 
-  const [customerActiveTab, setCustomerActiveTab] = useState("Status");
-
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [formData, setFormData] = useState({ name: "", phone: "", hp: "", keluhan: "", teknisi: "", status: "Masuk", harga: "", garansi: "-" });
-  const [newStok, setNewStok] = useState({ nama: "", qty: "", harga: "" });
-  const [newTeknisi, setNewTeknisi] = useState({ nama: "", pin: "1234" });
-  const [newPromo, setNewPromo] = useState({ title: "", desc: "", type: "promo" });
-  const [newAdminPin, setNewAdminPin] = useState(""); 
-  const [printData, setPrintData] = useState(null); 
-  
-  const [stats, setStats] = useState({ omzetHarian: 0, modalHarian: 0, omzetTotal: 0, piutang: 0, aktif: 0, selesai: 0, modalTotal: 0, labaTotal: 0 });
-  const [liveTimeMs, setLiveTimeMs] = useState(0); 
-
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [absenActionType, setAbsenActionType] = useState(""); 
-  const [activeAbsenData, setActiveAbsenData] = useState(null); 
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [stream, setStream] = useState(null);
-
-  const [isModalSparepartOpen, setIsModalSparepartOpen] = useState(false);
-  const [activeServiceForSparepart, setActiveServiceForSparepart] = useState(null);
-  const [sparepartData, setSparepartData] = useState({ sumber: "Stok Konter", detail: "", modal: "", stokId: "" });
-
-  // --- FIREBASE INIT ---
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) { console.error("Auth Error:", error); }
-    };
-    initAuth();
-    const unsubscribeAuth = onAuthStateChanged(auth, setUser);
-    return () => unsubscribeAuth();
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    const collections = {
-        services: collection(db, 'artifacts', appId, 'public', 'data', 'services'),
-        stok: collection(db, 'artifacts', appId, 'public', 'data', 'stok'),
-        teknisi: collection(db, 'artifacts', appId, 'public', 'data', 'teknisi'),
-        promos: collection(db, 'artifacts', appId, 'public', 'data', 'promos'),
-        logs: collection(db, 'artifacts', appId, 'public', 'data', 'logs'),
-        config: collection(db, 'artifacts', appId, 'public', 'data', 'config'),
-        absensi: collection(db, 'artifacts', appId, 'public', 'data', 'absensi')
-    };
-
-    const unsubServices = onSnapshot(query(collections.services), (snapshot) => { setServices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoadingDb(false); });
-    const unsubStok = onSnapshot(query(collections.stok), (snapshot) => setStokList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-    const unsubPromo = onSnapshot(query(collections.promos), (snapshot) => setPromoList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
-    const unsubLogs = onSnapshot(query(collections.logs), (snapshot) => { setActivityLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.timestamp - a.timestamp).slice(0, 50)); });
-    const unsubAbsensi = onSnapshot(query(collections.absensi), (snapshot) => { setAbsensiLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.waktuMasuk - a.waktuMasuk)); });
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SGM PRO - Solusi Gadget Martin</title>
     
-    const unsubConfig = onSnapshot(query(collections.config), (snapshot) => {
-        const configData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const profileInfo = configData.find(c => c.id === 'konter_profile');
-        if(profileInfo) setKonterProfile(profileInfo);
-        
-        const securityInfo = configData.find(c => c.id === 'security');
-        if(securityInfo) setAdminPinDB(securityInfo.adminPin);
-        
-        const lokasiInfo = configData.find(c => c.id === 'konter_location');
-        if(lokasiInfo) setKonterLocation(lokasiInfo);
-
-        const sessionInfo = configData.find(c => c.id === 'kasir_session');
-        if(sessionInfo) setKasirSession(sessionInfo);
-    });
-
-    const unsubTeknisi = onSnapshot(query(collections.teknisi), (snapshot) => { setTeknisiList(snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}))); });
-    return () => { unsubServices(); unsubStok(); unsubTeknisi(); unsubPromo(); unsubLogs(); unsubConfig(); unsubAbsensi(); };
-  }, [user]);
-
-  const isAppExpired = konterProfile.activeUntil ? new Date().getTime() > konterProfile.activeUntil : false;
-
-  const formatRp = (angka) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(Number(angka) || 0);
-  const formatDate = (timestamp) => new Date(timestamp).toLocaleString('id-ID', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
-  const formatTimeOnly = (timestamp) => new Date(timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  const getTodayDateStr = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`; };
-  const generateId = (prefix, list) => { const lastId = list.length > 0 ? list.map(i => i.id).sort().reverse()[0] : `${prefix}-000`; let num = 1; if (lastId && lastId.includes("-")) num = parseInt(lastId.split("-")[1]) + 1; return `${prefix}-${num.toString().padStart(3, '0')}`; };
-  const processHarga = (inputHarga) => { let hargaNum = Number(inputHarga); if (hargaNum > 0 && hargaNum < 10000) return hargaNum * 1000; return hargaNum; };
-  const calculateWorkHours = (ms) => { if(!ms) return "0j 0m 0d"; const totalDetik = Math.floor(ms / 1000); const jam = Math.floor(totalDetik / 3600); const menit = Math.floor((totalDetik % 3600) / 60); const detik = totalDetik % 60; return `${jam}j ${menit}m ${detik}d`; };
-  const getDistanceInMeters = (lat1, lon1, lat2, lon2) => { const R = 6371e3; const dLat = (lat2 - lat1) * Math.PI / 180; const dLon = (lon2 - lon1) * Math.PI / 180; const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return Math.floor(R * c); };
-  
-  const logActivity = async (action, detail) => { if(!user) return; try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), { user: currentUser || "Sistem", role: role || "Sistem", action, detail, timestamp: new Date().getTime() }); } catch (e) {} };
-
-  // --- STATS CALCULATION ---
-  useEffect(() => {
-    let tOmzetHarian = 0, tModalHarian = 0, tPiutang = 0, tAktif = 0, tSelesai = 0, tModalTotal = 0, tOmzetTotal = 0;
-    const sessionStart = kasirSession.startTime;
+    <!-- Library Essentials -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    services.forEach(s => {
-      const modal = Number(s.modalSparepart || 0); const omzet = Number(s.harga || 0);
-      if (s.status === "Sudah Diambil") {
-        tOmzetTotal += omzet; tModalTotal += modal;
-        if(s.tglDiambilTimestamp && s.tglDiambilTimestamp >= sessionStart) { tOmzetHarian += omzet; tModalHarian += modal; }
-      }
-      else if (s.status === "Selesai") { tPiutang += omzet; tSelesai++; } else { tAktif++; }
-    });
-    setStats({ omzetTotal: tOmzetTotal, omzetHarian: tOmzetHarian, modalHarian: tModalHarian, piutang: tPiutang, aktif: tAktif, selesai: tSelesai, modalTotal: tModalTotal, labaTotal: tOmzetTotal - tModalTotal });
-  }, [services, kasirSession]);
+    <!-- Firebase Compat SDK (Stable for Single HTML) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
-  // --- HANDLERS ---
-  const handleTutupKasir = async () => {
-      if(!konterProfile.waOwner) return alert("Atur nomor WA Owner di Pengaturan!");
-      if(!confirm(`Tutup Shift? Omzet: ${formatRp(stats.omzetHarian)}`)) return;
-      const msg = `*LAPORAN TUTUP SHIFT*%0AOmzet: ${formatRp(stats.omzetHarian)}%0ALaba: ${formatRp(stats.omzetHarian - stats.modalHarian)}`;
-      let wa = konterProfile.waOwner.replace(/\D/g, ''); if(wa.startsWith('0')) wa = '62' + wa.substring(1);
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'kasir_session'), { isOpen: true, startTime: new Date().getTime() });
-      window.open(`https://wa.me/${wa}?text=${msg}`, "_blank");
-  };
-
-  const handleStatusChange = async (sObj, status) => {
-      if (status === "Selesai" && !sObj.modalSparepart) {
-          setActiveServiceForSparepart({...sObj, targetStatus: status});
-          setIsModalSparepartOpen(true);
-      } else {
-          const update = { ...sObj, status };
-          if(status === "Sudah Diambil") update.tglDiambilTimestamp = new Date().getTime();
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', sObj.id), update);
-          logActivity("UPDATE STATUS", `${sObj.id} -> ${status}`);
-      }
-  };
-
-  const handleAddService = async (e) => {
-    e.preventDefault();
-    const docId = generateId("INV", services);
-    const data = { ...formData, harga: processHarga(formData.harga), tglMasuk: getTodayDateStr(), createdTimestamp: new Date().getTime(), modalSparepart: 0 };
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', docId), data);
-    setIsFormOpen(false);
-    logActivity("BUAT NOTA", docId);
-  };
-
-  const handleSaveSparepart = async (e) => {
-    e.preventDefault();
-    let modal = 0; let detail = sparepartData.detail;
-    if (sparepartData.sumber === "Stok Konter") {
-        const itm = stokList.find(i => i.id === sparepartData.stokId);
-        if(!itm || itm.qty <= 0) return alert("Stok Kosong!");
-        modal = Number(itm.harga); detail = itm.nama;
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', itm.id), { ...itm, qty: itm.qty - 1 });
-    } else {
-        modal = processHarga(sparepartData.modal);
-    }
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', activeServiceForSparepart.id), { 
-        ...activeServiceForSparepart, 
-        status: activeServiceForSparepart.targetStatus, 
-        modalSparepart: modal,
-        detailSparepart: detail
-    });
-    setIsModalSparepartOpen(false);
-  };
-
-  const openCamera = async () => {
-      setIsCameraOpen(true);
-      const s = await navigator.mediaDevices.getUserMedia({ video: true });
-      setStream(s); if (videoRef.current) videoRef.current.srcObject = s;
-  };
-
-  const takePhoto = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 300; canvas.height = 400;
-      canvas.getContext('2d').drawImage(videoRef.current, 0, 0, 300, 400);
-      const base64 = canvas.toDataURL('image/jpeg');
-      stream.getTracks().forEach(t => t.stop());
-      setIsCameraOpen(false);
-      if(absenActionType === "IN") {
-          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', `ABS-${currentUser}-${getTodayDateStr()}`), { 
-            teknisi: currentUser, tanggal: getTodayDateStr(), waktuMasuk: new Date().getTime(), fotoMasuk: base64 
-          });
-      } else {
-          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', activeAbsenData.id), { 
-            ...activeAbsenData, waktuPulang: new Date().getTime(), totalWaktuKerja: new Date().getTime() - activeAbsenData.waktuMasuk, fotoPulang: base64 
-          });
-      }
-  };
-
-  if (loadingDb) return <div className="h-screen flex items-center justify-center font-bold">Mematangkan Sistem SGM...</div>;
-
-  // --- RENDER LOGIN ---
-  if (!role) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-6">
-        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
-          <SgmLogo className="h-12 mx-auto mb-6" />
-          <h1 className="text-xl font-bold mb-8">{konterProfile.nama}</h1>
-          <div className="flex flex-col gap-3">
-            <button onClick={() => setRole("pelanggan")} className="bg-blue-600 text-white font-bold py-4 rounded-xl">🔍 Lacak Servisan</button>
-            <div className="py-2 text-xs text-gray-400 font-bold uppercase">Staff Only</div>
-            <button onClick={() => initiateLogin("admin")} className="bg-gray-800 text-white py-3 rounded-xl text-sm font-bold">Pemilik Konter</button>
-            <div className="grid grid-cols-2 gap-2">{teknisiList.map(t => <button key={t.id} onClick={() => initiateLogin("teknisi", t.nama)} className="bg-gray-100 py-2 rounded-xl text-xs font-bold">{t.nama}</button>)}</div>
-          </div>
-        </div>
-        {showLoginModal && (
-            <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-                <div className="bg-white p-6 rounded-2xl w-full max-w-xs animate-slide-up">
-                    <h3 className="font-bold mb-4">Login {loginInput.id || "Admin"}</h3>
-                    <input type="password" placeholder="PIN" className="w-full border-2 p-3 rounded-xl text-center mb-4 text-xl font-bold" value={loginInput.pin} onChange={e => setLoginInput({...loginInput, pin: e.target.value})} autoFocus />
-                    <button onClick={executeLoginPIN} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">Masuk</button>
-                    <button onClick={() => setShowLoginModal(false)} className="w-full py-2 text-xs text-gray-400 mt-2">Batal</button>
-                </div>
-            </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans no-print-area">
-      {/* HEADER */}
-      <div className={`px-4 py-3 flex justify-between items-center text-white shadow-md sticky top-0 z-40 ${role === 'admin' ? 'bg-blue-700' : 'bg-slate-800'}`}>
-        <div className="font-bold truncate">{konterProfile.nama}</div>
-        <div className="flex gap-2">
-            <button onClick={() => setIsFormOpen(true)} className="bg-white text-gray-800 px-3 py-1 rounded-lg text-xs font-bold">+ Nota</button>
-            <button onClick={handleLogout} className="bg-red-500 px-3 py-1 rounded-lg text-xs font-bold">Logout</button>
-        </div>
-      </div>
-
-      {/* NAVBAR */}
-      <div className="bg-white flex overflow-x-auto p-2 gap-2 border-b sticky top-12 z-30 no-scrollbar">
-        {navItems.map(n => <button key={n} onClick={() => setActiveTab(n)} className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ${activeTab === n ? 'bg-blue-600 text-white' : 'text-gray-500'}`}>{n}</button>)}
-      </div>
-
-      <div className="p-4 flex-1 max-w-2xl mx-auto w-full pb-20">
-        
-        {/* DASHBOARD */}
-        {activeTab === "Dashboard" && (
-            <div className="space-y-4">
-                <div className="bg-gradient-to-br from-blue-600 to-indigo-800 p-6 rounded-3xl text-white shadow-lg">
-                    <div className="text-xs opacity-70 mb-1">OMZET SHIFT INI</div>
-                    <div className="text-3xl font-black">{formatRp(stats.omzetHarian)}</div>
-                    {role === "admin" && <button onClick={handleTutupKasir} className="mt-4 w-full bg-white text-blue-800 font-bold py-2 rounded-xl text-sm">Tutup Buku & Lapor WA</button>}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-white p-4 rounded-2xl shadow-sm border"><div className="text-[10px] text-gray-400 font-bold">ANTREAN</div><div className="text-2xl font-black">{stats.aktif}</div></div>
-                    <div className="bg-white p-4 rounded-2xl shadow-sm border"><div className="text-[10px] text-gray-400 font-bold">SIAP AMBIL</div><div className="text-2xl font-black">{stats.selesai}</div></div>
-                </div>
-            </div>
-        )}
-
-        {/* SERVICE */}
-        {activeTab === "Service" && (
-            <div className="space-y-3">
-                {services.filter(s => s.status !== "Sudah Diambil").map(s => (
-                    <div key={s.id} className="bg-white p-4 rounded-2xl shadow-sm border flex flex-col gap-3">
-                        <div className="flex justify-between">
-                            <div><div className="font-bold text-gray-800">{s.hp}</div><div className="text-[10px] text-gray-400 font-mono">{s.id} | {s.name}</div></div>
-                            <div className={`text-[10px] px-2 py-1 rounded-full font-bold self-start ${statusColor[s.status]}`}>{s.status}</div>
-                        </div>
-                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded-lg italic">"{s.keluhan}"</div>
-                        <div className="flex justify-between items-center">
-                            <div className="text-blue-600 font-black">{formatRp(s.harga)}</div>
-                            <select value={s.status} onChange={e => handleStatusChange(s, e.target.value)} className="text-[10px] border p-1 rounded-lg font-bold">
-                                <option value="Masuk">Masuk</option><option value="Proses">Proses</option><option value="Selesai">Selesai</option><option value="Sudah Diambil">Diambil</option>
-                            </select>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        )}
-
-        {/* STOK */}
-        {activeTab === "Stok" && role === "admin" && (
-            <div className="space-y-4">
-                <form onSubmit={handleAddStokDB} className="bg-white p-4 rounded-2xl border shadow-sm space-y-3">
-                    <input type="text" placeholder="Nama Part" className="w-full border p-2 rounded-lg" value={newStok.nama} onChange={e => setNewStok({...newStok, nama: e.target.value})} required/>
-                    <div className="grid grid-cols-2 gap-2">
-                        <input type="number" placeholder="Qty" className="border p-2 rounded-lg" value={newStok.qty} onChange={e => setNewStok({...newStok, qty: e.target.value})} required/>
-                        <input type="number" placeholder="Modal" className="border p-2 rounded-lg" value={newStok.harga} onChange={e => setNewStok({...newStok, harga: e.target.value})} required/>
-                    </div>
-                    <button className="w-full bg-blue-600 text-white font-bold py-2 rounded-lg">Simpan Stok</button>
-                </form>
-                {stokList.map(item => (
-                    <div key={item.id} className="bg-white p-3 rounded-xl border flex justify-between items-center">
-                        <div><div className="font-bold text-sm">{item.nama}</div><div className="text-[10px] text-red-500 font-bold">{formatRp(item.harga)}</div></div>
-                        <div className="flex items-center gap-4"><div className="font-black text-blue-600">{item.qty} pcs</div><button onClick={() => handleDeleteStokDB(item.id)} className="text-gray-300">✕</button></div>
-                    </div>
-                ))}
-            </div>
-        )}
-
-        {/* PENGATURAN */}
-        {activeTab === "Pengaturan" && role === "admin" && (
-            <div className="space-y-4">
-                <div className="bg-white p-4 rounded-2xl border shadow-sm">
-                    <h3 className="font-bold mb-4">Profil Konter</h3>
-                    <div className="space-y-3">
-                        <input type="text" placeholder="Nama Toko" className="w-full border p-2 rounded-lg" value={konterProfile.nama} onChange={e => setKonterProfile({...konterProfile, nama: e.target.value})} />
-                        <input type="tel" placeholder="WA Owner (62...)" className="w-full border p-2 rounded-lg" value={konterProfile.waOwner} onChange={e => setKonterProfile({...konterProfile, waOwner: e.target.value})} />
-                        <button onClick={handleSaveKonterProfile} className="w-full bg-gray-800 text-white py-2 rounded-lg font-bold">Simpan Profil</button>
-                    </div>
-                </div>
-                <div className="bg-red-50 p-4 rounded-2xl border-2 border-red-200 border-dashed text-center">
-                    <div className="text-[10px] font-bold text-red-600 mb-2 uppercase">Developer Tools</div>
-                    <div className="flex gap-2">
-                        <button onClick={testSimulateExpired} className="flex-1 bg-red-600 text-white text-[10px] p-2 rounded-lg font-bold">Simulasi Habis</button>
-                        <button onClick={testSimulateRenew} className="flex-1 bg-green-600 text-white text-[10px] p-2 rounded-lg font-bold">Simulasi Bayar</button>
-                    </div>
-                </div>
-            </div>
-        )}
-      </div>
-
-      {/* MODAL SPAREPART */}
-      {isModalSparepartOpen && (
-          <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-6">
-              <form onSubmit={handleSaveSparepart} className="bg-white p-6 rounded-3xl w-full max-w-xs space-y-4 animate-slide-up">
-                  <h4 className="font-bold text-center">Input Modal Perbaikan</h4>
-                  <select value={sparepartData.sumber} onChange={e => setSparepartData({...sparepartData, sumber: e.target.value})} className="w-full border p-3 rounded-xl font-bold bg-gray-50">
-                      <option value="Stok Konter">Ambil Stok Toko</option>
-                      <option value="Beli Luar">Beli Luar (Manual)</option>
-                  </select>
-                  {sparepartData.sumber === "Stok Konter" ? (
-                      <select required className="w-full border p-3 rounded-xl" value={sparepartData.stokId} onChange={e => setSparepartData({...sparepartData, stokId: e.target.value})}>
-                          {stokList.map(i => <option key={i.id} value={i.id}>{i.nama} (Sisa {i.qty})</option>)}
-                      </select>
-                  ) : (
-                      <div className="space-y-2">
-                          <input type="text" placeholder="Nama Alat" className="w-full border p-3 rounded-xl" onChange={e => setSparepartData({...sparepartData, detail: e.target.value})} />
-                          <input type="number" placeholder="Harga Beli" className="w-full border p-3 rounded-xl" onChange={e => setSparepartData({...sparepartData, modal: e.target.value})} />
-                      </div>
-                  )}
-                  <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl">Selesaikan Servis</button>
-              </form>
-          </div>
-      )}
-
-      {/* FORM NOTA */}
-      {isFormOpen && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-              <form onSubmit={handleAddService} className="bg-white p-6 rounded-3xl w-full max-w-sm space-y-3 animate-slide-up">
-                  <h3 className="font-bold">Nota Baru</h3>
-                  <input type="text" placeholder="Nama" className="w-full border p-2 rounded-lg" onChange={e => setFormData({...formData, name: e.target.value})} required/>
-                  <input type="tel" placeholder="No WA" className="w-full border p-2 rounded-lg font-bold" onChange={e => setFormData({...formData, phone: e.target.value})} required/>
-                  <input type="text" placeholder="Tipe HP" className="w-full border p-2 rounded-lg" onChange={e => setFormData({...formData, hp: e.target.value})} required/>
-                  <textarea placeholder="Keluhan" className="w-full border p-2 rounded-lg" onChange={e => setFormData({...formData, keluhan: e.target.value})} required></textarea>
-                  <div className="flex gap-2">
-                    <input type="number" placeholder="Est. Biaya" className="w-full border p-2 rounded-lg font-bold text-blue-600" onChange={e => setFormData({...formData, harga: e.target.value})} required/>
-                    <select className="border p-2 rounded-lg text-xs" onChange={e => setFormData({...formData, teknisi: e.target.value})}>{teknisiList.map(t => <option key={t.id} value={t.nama}>{t.nama}</option>)}</select>
-                  </div>
-                  <button className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl">Simpan Nota</button>
-                  <button type="button" onClick={() => setIsFormOpen(false)} className="w-full py-2 text-xs text-gray-400">Batal</button>
-              </form>
-          </div>
-      )}
-
-      <div className="fixed bottom-0 left-0 right-0 py-4 bg-white border-t flex flex-col items-center no-print-area">
-          <span className="text-[8px] font-bold text-gray-300 uppercase tracking-widest mb-1">Licensed to SGM Group</span>
-          <SgmLogo className="h-4 opacity-30" />
-      </div>
-
-      <style dangerouslySetInnerHTML={{__html: `
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            background-color: #f8fafc;
+            -webkit-tap-highlight-color: transparent;
+            overflow-x: hidden;
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .bottom-nav-shadow { box-shadow: 0 -4px 20px rgba(0,0,0,0.05); }
+        .glass { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); }
         .animate-slide-up { animation: slideUp 0.3s ease-out; }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        @media print {
-            .no-print-area { display: none !important; }
-            #printable-receipt { display: block !important; width: 58mm; padding: 5px; font-family: monospace; }
-        }
-      `}} />
-    </div>
-  );
-}
+        @media print { .no-print { display: none !important; } }
+        input, select, textarea { font-size: 16px !important; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-```
+    <script type="text/babel">
+        // --- KONFIGURASI FIREBASE ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAnaxWWQRgCJ2BT2LY8quibHBPzgoUS1kE",
+            authDomain: "gsm-app-afe20.firebaseapp.com",
+            projectId: "gsm-app-afe20",
+            storageBucket: "gsm-app-afe20.firebasestorage.app",
+            messagingSenderId: "721664568589",
+            appId: "1:721664568589:web:508d22c640dcea38135444"
+        };
+
+        // Inisialisasi Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const appId = "SGM-FINAL-V32";
+
+        const { useState, useEffect, useRef } = React;
+
+        const statusColor = {
+            "Masuk": "bg-gray-200 text-gray-700",
+            "Bongkar": "bg-yellow-100 text-yellow-700",
+            "Menunggu Sparepart": "bg-orange-100 text-orange-700",
+            "Proses": "bg-blue-100 text-blue-700",
+            "Selesai": "bg-green-100 text-green-700",
+            "Sudah Diambil": "bg-teal-100 text-teal-700",
+        };
+
+        function App() {
+            // -- AUTH & ROLE --
+            const [user, setUser] = useState(null);
+            const [role, setRole] = useState(null); 
+            const [activeTab, setActiveTab] = useState("Dashboard");
+            const [loading, setLoading] = useState(true);
+            const [showPin, setShowPin] = useState(false);
+            const [pinInput, setPinInput] = useState("");
+            const [dbOnline, setDbOnline] = useState(false);
+            const [dbMissing, setDbMissing] = useState(false);
+
+            // -- DATA STATES (Offline First via LocalStorage) --
+            const [services, setServices] = useState(() => JSON.parse(localStorage.getItem('sgm_srv') || '[]'));
+            const [stok, setStok] = useState(() => JSON.parse(localStorage.getItem('sgm_stk') || '[]'));
+            const [teknisi, setTeknisi] = useState([{id: '1', nama: 'Martin', pin: '1234'}]);
+            const [absensi, setAbsensi] = useState([]);
+
+            // -- UI FORMS --
+            const [isFormOpen, setIsFormOpen] = useState(false);
+            const [formData, setFormData] = useState({ name: "", phone: "", hp: "", keluhan: "", harga: "", status: "Masuk" });
+
+            // -- INITIAL AUTH --
+            useEffect(() => {
+                auth.signInAnonymously().catch(e => console.log("Auth Offline Mode"));
+                const unsubscribe = auth.onAuthStateChanged(u => {
+                    setUser(u);
+                    // Paksa matikan loading setelah 3 detik jika tidak ada respon dari Cloud
+                    setTimeout(() => setLoading(false), 3000);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // -- REALTIME CLOUD SYNC --
+            useEffect(() => {
+                if (!user) return;
+                
+                const collections = ['services', 'stok', 'teknisi', 'absensi'];
+                const unsubscribers = collections.map(col => {
+                    return db.collection('artifacts').doc(appId).collection('public').doc('data').collection(col)
+                        .onSnapshot(s => {
+                            const data = s.docs.map(d => ({id: d.id, ...d.data()}));
+                            if (data.length > 0) {
+                                if (col === 'services') { setServices(data); localStorage.setItem('sgm_srv', JSON.stringify(data)); }
+                                if (col === 'stok') { setStok(data); localStorage.setItem('sgm_stk', JSON.stringify(data)); }
+                                if (col === 'teknisi') setTeknisi(data);
+                                if (col === 'absensi') setAbsensi(data);
+                            }
+                            setDbOnline(true);
+                            setDbMissing(false);
+                            setLoading(false);
+                        }, (err) => {
+                            console.log(`Firestore ${col} Error:`, err.message);
+                            if (err.message.includes("does not exist") || err.code === "not-found") {
+                                setDbMissing(true);
+                            }
+                            setDbOnline(false);
+                            setLoading(false);
+                        });
+                });
+
+                return () => unsubscribers.forEach(unsub => unsub());
+            }, [user]);
+
+            // -- UTILITIES --
+            const formatRp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
+
+            const handleLogin = () => {
+                if (pinInput === "konter123") { setRole("admin"); setShowPin(false); setPinInput(""); }
+                else if (pinInput === "1234") { setRole("teknisi"); setShowPin(false); setPinInput(""); }
+                else { alert("PIN Salah!"); }
+            };
+
+            const submitNota = async (e) => {
+                e.preventDefault();
+                const id = `SGM-${Math.floor(1000 + Math.random() * 9000)}`;
+                const newData = { 
+                    ...formData, 
+                    id, 
+                    harga: Number(formData.harga), 
+                    tglMasuk: new Date().toLocaleDateString('id-ID'), 
+                    timestamp: Date.now() 
+                };
+                
+                // Optimistic Update (Lokal dulu agar instan)
+                const updated = [newData, ...services];
+                setServices(updated);
+                localStorage.setItem('sgm_srv', JSON.stringify(updated));
+                
+                // Kirim ke Cloud (jika online)
+                try {
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('services').doc(id).set(newData);
+                } catch (e) { console.log("Hanya tersimpan di HP (Offline/DB Belum Ada)"); }
+
+                setIsFormOpen(false);
+                setFormData({ name: "", phone: "", hp: "", keluhan: "", harga: "", status: "Masuk" });
+            };
+
+            const updateStatus = async (id, status) => {
+                const updated = services.map(s => s.id === id ? { ...s, status } : s);
+                setServices(updated);
+                localStorage.setItem('sgm_srv', JSON.stringify(updated));
+                
+                try {
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('services').doc(id).update({ status });
+                } catch (e) { console.log("Status diperbarui di HP saja"); }
+            };
+
+            // --- COMPONENTS ---
+            const StatCard = ({ title, value, color = "text-gray-800" }) => (
+                <div className="bg-white p-5 rounded-[30px] border border-gray-50 shadow-sm transition-transform active:scale-95">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1 tracking-widest leading-none">{title}</p>
+                    <p className={`text-2xl font-black ${color} tracking-tighter`}>{value}</p>
+                </div>
+            );
+
+            if (loading && !services.length) return (
+                <div className="h-screen flex flex-col items-center justify-center bg-white p-10 text-center">
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <p className="text-gray-400 font-bold text-[10px] tracking-widest uppercase">Menghubungkan SGM PRO...</p>
+                    {dbMissing && (
+                        <p className="mt-4 text-[9px] text-orange-500 font-medium">Database (default) belum dibuat di Firebase Console.</p>
+                    )}
+                </div>
+            );
+
+            // -- RENDER LOGIN --
+            if (!role) return (
+                <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-8 text-center">
+                    <div className="w-20 h-20 bg-blue-600 rounded-[2.5rem] mb-6 flex items-center justify-center shadow-2xl shadow-blue-500/40">
+                        <span className="text-4xl text-white font-black italic">S</span>
+                    </div>
+                    <h1 className="text-white text-3xl font-black tracking-tighter mb-1 uppercase">SGM PRO V3.3</h1>
+                    <p className="text-blue-400 text-[10px] font-bold tracking-[0.4em] uppercase mb-12 leading-relaxed">Solusi Gadget Martin<br/>Master Edition</p>
+                    
+                    <div className="w-full max-w-xs space-y-4">
+                        <button onClick={() => setRole("pelanggan")} className="w-full bg-blue-600 text-white font-bold py-5 rounded-3xl shadow-xl shadow-blue-600/20 active:scale-95 transition">PORTAL PELANGGAN</button>
+                        <button onClick={() => setShowPin(true)} className="w-full bg-white/5 border border-white/10 text-white font-bold py-5 rounded-3xl active:bg-white/10 transition">DASHBOARD STAFF</button>
+                    </div>
+
+                    {dbMissing && (
+                        <div className="mt-12 p-5 bg-orange-600/20 border border-orange-500/40 rounded-3xl max-w-xs animate-pulse">
+                            <p className="text-orange-300 text-[10px] font-bold leading-relaxed uppercase mb-2">
+                                ⚠️ DATABASE BELUM DIBUAT
+                            </p>
+                            <p className="text-white/60 text-[9px] leading-relaxed">
+                                Silakan buka Firebase Console, pilih menu <b>Build > Firestore Database</b>, lalu klik <b>"Create Database"</b> untuk mengaktifkan sinkronisasi Cloud.
+                            </p>
+                        </div>
+                    )}
+
+                    {showPin && (
+                        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-50 flex items-center justify-center p-8">
+                            <div className="bg-white p-10 rounded-[3rem] w-full max-w-xs text-center shadow-2xl animate-slide-up">
+                                <h2 className="font-black text-gray-800 text-xl mb-8 uppercase tracking-tight">PIN Otorisasi</h2>
+                                <input type="password" placeholder="••••" className="w-full bg-gray-50 border-2 border-gray-100 p-5 rounded-3xl text-center text-4xl font-black tracking-[0.4em] mb-8 focus:border-blue-500 outline-none transition-all" value={pinInput} onChange={e => setPinInput(e.target.value)} autoFocus />
+                                <button onClick={handleLogin} className="w-full bg-blue-600 text-white font-black py-5 rounded-3xl shadow-xl shadow-blue-500/30">MASUK SEKARANG</button>
+                                <button onClick={() => {setShowPin(false); setPinInput("");}} className="mt-8 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Tutup</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+
+            // -- MAIN APP RENDER --
+            return (
+                <div className="min-h-screen pb-32">
+                    {/* Sticky Header */}
+                    <header className="glass sticky top-0 z-40 px-6 py-5 flex justify-between items-center border-b border-gray-100">
+                        <div>
+                            <h2 className="font-black text-blue-600 tracking-tighter text-2xl italic leading-none">SGM PRO</h2>
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                                <div className={`w-2 h-2 rounded-full ${dbOnline ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : (dbMissing ? 'bg-orange-500' : 'bg-gray-300')}`}></div>
+                                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest leading-none">
+                                    {role} • {dbOnline ? 'Awan Aktif' : (dbMissing ? 'Butuh Setup' : 'Lokal')}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => setIsFormOpen(true)} className="bg-blue-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 font-bold text-2xl active:scale-90 transition">+</button>
+                            <button onClick={() => setRole(null)} className="bg-gray-50 text-gray-300 w-12 h-12 rounded-2xl flex items-center justify-center font-bold active:bg-red-50 active:text-red-400 transition">✕</button>
+                        </div>
+                    </header>
+
+                    <main className="p-6 max-w-xl mx-auto w-full">
+                        {activeTab === "Dashboard" && (
+                            <div className="space-y-6">
+                                {/* Profit Card */}
+                                <div className="bg-gradient-to-br from-blue-600 to-indigo-900 p-8 rounded-[40px] text-white shadow-2xl relative overflow-hidden animate-slide-up">
+                                    <div className="relative z-10">
+                                        <p className="text-[10px] font-bold opacity-60 uppercase tracking-[0.2em] mb-1.5">Total Omzet</p>
+                                        <h3 className="text-4xl font-black tracking-tighter">
+                                            {formatRp(services.filter(s => s.status === "Sudah Diambil" || s.status === "Selesai").reduce((a, b) => a + (b.harga || 0), 0))}
+                                        </h3>
+                                    </div>
+                                    <div className="absolute -right-6 -bottom-6 text-[10rem] font-black opacity-10 italic pointer-events-none select-none">S</div>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <StatCard title="Antrean" value={services.filter(s => s.status === 'Masuk' || s.status === 'Proses').length} />
+                                    <StatCard title="Siap Ambil" value={services.filter(s => s.status === 'Selesai').length} color="text-green-500" />
+                                </div>
+
+                                {/* Active List */}
+                                <div className="space-y-4">
+                                    <h4 className="font-black text-gray-800 tracking-tight flex justify-between items-center px-1">
+                                        <span>LIST SERVIS AKTIF</span>
+                                        <span className="text-[10px] text-blue-600 font-bold uppercase tracking-widest">{services.filter(s => s.status !== 'Sudah Diambil').length} UNIT</span>
+                                    </h4>
+                                    
+                                    {services.filter(s => s.status !== "Sudah Diambil").length === 0 ? (
+                                        <div className="text-center py-24 bg-white rounded-[40px] border-2 border-dashed border-gray-100">
+                                            <p className="text-gray-300 text-xs font-bold italic uppercase tracking-widest">Tidak ada antrean</p>
+                                        </div>
+                                    ) : (
+                                        services.filter(s => s.status !== "Sudah Diambil").sort((a,b) => b.timestamp - a.timestamp).map(s => (
+                                            <div key={s.id} className="bg-white p-6 rounded-[35px] border border-gray-50 shadow-sm flex flex-col gap-4 animate-slide-up">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex-1 mr-4 overflow-hidden">
+                                                        <h5 className="font-black text-gray-800 text-base truncate uppercase tracking-tight leading-tight">{s.hp}</h5>
+                                                        <p className="text-[10px] font-bold text-blue-500 uppercase mt-1 tracking-widest">{s.id} • {s.name}</p>
+                                                    </div>
+                                                    <div className={`text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider shadow-sm ${statusColor[s.status]}`}>{s.status}</div>
+                                                </div>
+                                                <div className="text-xs text-gray-500 font-medium bg-gray-50 p-4 rounded-3xl italic border border-gray-100 leading-relaxed">
+                                                    "{s.keluhan}"
+                                                </div>
+                                                <div className="flex justify-between items-center pt-1 px-1">
+                                                    <div className="text-blue-800 font-black text-xl tracking-tighter">{formatRp(s.harga)}</div>
+                                                    <div className="relative">
+                                                        <select 
+                                                            value={s.status} 
+                                                            onChange={(e) => updateStatus(s.id, e.target.value)}
+                                                            className="bg-gray-100 border-none text-[10px] font-black pl-4 pr-10 py-3 rounded-2xl focus:ring-2 focus:ring-blue-500 appearance-none shadow-inner"
+                                                        >
+                                                            <option value="Masuk">MASUK</option>
+                                                            <option value="Proses">PROSES</option>
+                                                            <option value="Selesai">SELESAI</option>
+                                                            <option value="Sudah Diambil">DIAMBIL</option>
+                                                        </select>
+                                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-[8px]">▼</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "Stok" && (
+                            <div className="space-y-6 animate-slide-up">
+                                <div className="flex justify-between items-center px-1">
+                                    <h3 className="font-black text-2xl tracking-tighter uppercase">Gudang Part</h3>
+                                    <button className="bg-gray-900 text-white text-[10px] px-5 py-3 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-gray-900/20 active:scale-90 transition">+ ITEM</button>
+                                </div>
+                                <div className="bg-white p-8 rounded-[40px] border border-gray-50 shadow-sm space-y-5">
+                                    {stok.length === 0 ? (
+                                        <div className="py-20 text-center">
+                                            <p className="text-gray-200 text-[10px] font-black uppercase italic tracking-[0.3em] leading-loose">
+                                                Stok Kosong
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        stok.map(item => (
+                                            <div key={item.id} className="flex justify-between items-center pb-5 border-b border-gray-50 last:border-0 last:pb-0">
+                                                <div>
+                                                    <p className="font-black text-gray-800 text-sm uppercase tracking-tight">{item.nama}</p>
+                                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">{formatRp(item.harga)}</p>
+                                                </div>
+                                                <div className="bg-blue-50 text-blue-600 px-5 py-2.5 rounded-2xl font-black text-xs shadow-inner">
+                                                    {item.qty} PCS
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "Absensi" && (
+                            <div className="space-y-6 animate-slide-up">
+                                <div className="bg-white p-10 rounded-[50px] border border-gray-50 shadow-sm text-center">
+                                    <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
+                                        <span className="text-4xl">📸</span>
+                                    </div>
+                                    <h3 className="font-black text-2xl mb-2 uppercase tracking-tighter">Selfie Absen</h3>
+                                    <p className="text-xs text-gray-400 mb-8 font-medium px-4">Lakukan absensi untuk memulai shift kerja.</p>
+                                    <button className="w-full bg-blue-600 text-white font-black py-5 rounded-[2rem] shadow-xl shadow-blue-500/20 active:scale-95 transition">ABSEN SEKARANG</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "Pengaturan" && (
+                            <div className="space-y-6 animate-slide-up">
+                                <h3 className="font-black text-2xl tracking-tighter uppercase px-2">Admin Panel</h3>
+                                <div className="space-y-3">
+                                    <div className="bg-white p-6 rounded-[30px] border flex items-center justify-between shadow-sm">
+                                        <span className="text-sm font-bold text-gray-700">Database Status</span>
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-2 h-2 rounded-full ${dbOnline ? 'bg-green-500' : (dbMissing ? 'bg-orange-500' : 'bg-red-500')}`}></div>
+                                            <span className={`text-[10px] font-black uppercase ${dbOnline ? 'text-green-600' : (dbMissing ? 'text-orange-600' : 'text-red-600')}`}>
+                                                {dbOnline ? 'Terhubung Awan' : (dbMissing ? 'Firestore Belum Dibuat' : 'Offline')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {dbMissing && (
+                                        <div className="bg-orange-50 p-6 rounded-[30px] border border-orange-200">
+                                            <p className="text-[10px] font-bold text-orange-800 leading-relaxed uppercase mb-2">💡 Instruksi Setup Cloud:</p>
+                                            <ol className="text-[9px] text-orange-700 space-y-1 ml-4 list-decimal font-medium">
+                                                <li>Buka <a href="https://console.firebase.google.com/" target="_blank" className="underline font-black">Firebase Console</a></li>
+                                                <li>Pilih proyek: <b>gsm-app-afe20</b></li>
+                                                <li>Menu kiri: <b>Build > Firestore Database</b></li>
+                                                <li>Klik tombol <b>Create Database</b></li>
+                                                <li>Pilih lokasi (Singapore), klik Next</li>
+                                                <li>Pilih <b>Start in test mode</b>, klik Create</li>
+                                            </ol>
+                                        </div>
+                                    )}
+                                </div>
+                                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full bg-red-50 text-red-500 font-black py-5 rounded-3xl border border-red-100 text-[10px] tracking-widest uppercase active:bg-red-500 active:text-white transition mt-6">RESET DATA LOKAL</button>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Bottom Nav */}
+                    <nav className="fixed bottom-6 left-6 right-6 glass rounded-[2.5rem] border border-white/50 px-6 py-4 flex justify-around items-center bottom-nav-shadow z-40">
+                        {[
+                            {id: 'Dashboard', icon: '🏠', label: 'Home'},
+                            {id: 'Stok', icon: '📦', label: 'Part'},
+                            {id: 'Absensi', icon: '📸', label: 'Absen'},
+                            {id: 'Pengaturan', icon: '⚙️', label: 'Admin'}
+                        ].map(item => (
+                            <button 
+                                key={item.id}
+                                onClick={() => setActiveTab(item.id)} 
+                                className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${activeTab === item.id ? 'text-blue-600 scale-110' : 'text-gray-300'}`}
+                            >
+                                <span className={`text-2xl ${activeTab === item.id ? 'drop-shadow-[0_0_8px_rgba(37,99,235,0.3)]' : ''}`}>{item.icon}</span>
+                                <span className={`text-[9px] font-black uppercase tracking-[0.15em] ${activeTab === item.id ? 'opacity-100' : 'opacity-40'}`}>{item.label}</span>
+                            </button>
+                        ))}
+                    </nav>
+
+                    {/* Modal Nota Baru */}
+                    {isFormOpen && (
+                        <div className="fixed inset-0 bg-[#0f172a]/90 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+                            <form onSubmit={submitNota} className="bg-white w-full max-w-sm rounded-t-[3.5rem] sm:rounded-[3.5rem] p-10 space-y-4 animate-slide-up shadow-2xl overflow-y-auto max-h-[92vh]">
+                                <div className="w-16 h-1.5 bg-gray-100 rounded-full mx-auto mb-6 sm:hidden"></div>
+                                <div className="text-center mb-6">
+                                    <h3 className="font-black text-2xl tracking-tighter uppercase leading-none">NOTA BARU</h3>
+                                    <p className="text-[10px] font-bold text-gray-400 mt-2 uppercase tracking-[0.2em]">SGM PROFESSIONAL SYSTEM</p>
+                                </div>
+                                <div className="space-y-3">
+                                    <input type="text" placeholder="Nama Pelanggan" className="w-full bg-gray-50 border-none p-5 rounded-3xl font-bold focus:ring-2 focus:ring-blue-500 transition-all shadow-inner" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
+                                    <input type="tel" placeholder="WA (62...)" className="w-full bg-gray-50 border-none p-5 rounded-3xl font-bold focus:ring-2 focus:ring-blue-500 transition-all shadow-inner" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} required />
+                                    <input type="text" placeholder="Tipe HP / Seri" className="w-full bg-gray-50 border-none p-5 rounded-3xl font-bold focus:ring-2 focus:ring-blue-500 transition-all shadow-inner" value={formData.hp} onChange={e => setFormData({...formData, hp: e.target.value})} required />
+                                    <input type="number" placeholder="Harga" className="w-full bg-gray-50 border-none p-5 rounded-3xl font-black text-blue-600 shadow-inner" value={formData.harga} onChange={e => setFormData({...formData, harga: e.target.value})} required />
+                                    <textarea placeholder="Keluhan" className="w-full bg-gray-50 border-none p-5 rounded-3xl font-bold h-24 focus:ring-2 focus:ring-blue-500 transition-all shadow-inner resize-none" value={formData.keluhan} onChange={e => setFormData({...formData, keluhan: e.target.value})} required></textarea>
+                                </div>
+                                <div className="pt-4 space-y-3">
+                                    <button type="submit" className="w-full bg-blue-600 text-white font-black py-5 rounded-[2rem] shadow-2xl shadow-blue-600/30 active:scale-95 transition">SIMPAN</button>
+                                    <button type="button" onClick={() => setIsFormOpen(false)} className="w-full text-[10px] font-bold text-gray-300 uppercase py-2 tracking-widest">Tutup</button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>
