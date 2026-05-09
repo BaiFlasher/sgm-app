@@ -1,117 +1,36 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged, 
-  signInWithCustomToken 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  query, 
-  addDoc, 
-  updateDoc,
-  deleteDoc
+  getFirestore, collection, doc, setDoc, getDoc, 
+  query, onSnapshot, addDoc, updateDoc, deleteDoc, 
+  serverTimestamp, increment 
 } from 'firebase/firestore';
 import { 
-  Camera, Plus, LogOut, LayoutDashboard, Wrench, Package, Users, 
-  History, Settings, Printer, Save, Clock, CheckCircle2, 
-  AlertCircle, ChevronLeft, User, ShieldCheck, Search, MapPin, 
-  Send, Trash2, Edit3, Smartphone, DollarSign, TrendingUp
-} from "lucide-react";
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+} from 'firebase/auth';
+import { 
+  LayoutDashboard, Wrench, Package, ClipboardList, 
+  Users, MapPin, Camera, Search, Send, Plus, 
+  ChevronRight, LogOut, TrendingUp, AlertTriangle, CheckCircle2, Clock
+} from 'lucide-react';
 
-// --- KONFIGURASI FIREBASE ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "AIzaSyAnaxWWQRgCJ2BT2LY8quibHBPzgoUS1kE",
-      authDomain: "gsm-app-afe20.firebaseapp.com",
-      projectId: "gsm-app-afe20",
-      storageBucket: "gsm-app-afe20.firebasestorage.app",
-      messagingSenderId: "721664568589",
-      appId: "1:721664568589:web:508d22c640dcea38135444"
-    };
-
+// --- Konfigurasi Firebase ---
+const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'SGM-PRO-KONTER-01';
-
-const statusColor = {
-  "Masuk": "bg-gray-100 text-gray-600 border-gray-200",
-  "Bongkar": "bg-yellow-100 text-yellow-700 border-yellow-200",
-  "Menunggu Sparepart": "bg-orange-100 text-orange-700 border-orange-200",
-  "Proses": "bg-blue-100 text-blue-700 border-blue-200",
-  "Selesai": "bg-green-100 text-green-700 border-green-200",
-  "Sudah Diambil": "bg-emerald-600 text-white border-emerald-700",
-  "Cancel": "bg-red-100 text-red-700 border-red-200",
-};
-
-// --- KOMPONEN LOGO ---
-const SgmLogo = ({ className = "" }) => (
-  <svg viewBox="0 0 140 40" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="sgmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stopColor="#0284c7" />
-        <stop offset="50%" stopColor="#0ea5e9" />
-        <stop offset="100%" stopColor="#22d3ee" />
-      </linearGradient>
-    </defs>
-    <circle cx="20" cy="20" r="16" stroke="url(#sgmGrad)" strokeWidth="3" fill="none" strokeDasharray="60 20" />
-    <circle cx="20" cy="20" r="12" stroke="#0ea5e9" strokeWidth="1" fill="none" />
-    <text x="45" y="30" fontFamily="Arial, sans-serif" fontWeight="900" fontSize="32" fill="url(#sgmGrad)" fontStyle="italic" letterSpacing="-2">SGM</text>
-  </svg>
-);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'gsm-konter-pro';
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [loadingDb, setLoadingDb] = useState(true);
-  const [activeTab, setActiveTab] = useState("Dashboard");
-  const [searchQuery, setSearchQuery] = useState("");
-  
-  // State Login
-  const [loginStep, setLoginStep] = useState("portal-selection");
-  const [loginInput, setLoginInput] = useState({ id: "", pin: "" });
-  
-  // State Data
+  const [role, setRole] = useState('guest'); // guest, admin, teknisi
+  const [currentView, setCurrentView] = useState('landing');
   const [services, setServices] = useState([]);
-  const [stokList, setStokList] = useState([]);
-  const [teknisiList, setTeknisiList] = useState([]);
-  const [activityLogs, setActivityLogs] = useState([]);
-  const [absensiLogs, setAbsensiLogs] = useState([]);
-  const [konterProfile, setKonterProfile] = useState({ 
-    nama: "SGM Service Center", 
-    waOwner: "", 
-    lat: -6.2000, 
-    lng: 106.8166, 
-    radius: 100 // meter
-  });
-  const [kasirSession, setKasirSession] = useState({ isOpen: true, startTime: Date.now() });
-  const [adminPinDB, setAdminPinDB] = useState("1234");
+  const [inventory, setInventory] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // State UI
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [formData, setFormData] = useState({ name: "", phone: "", hp: "", keluhan: "", teknisi: "", status: "Masuk", harga: "" });
-  const [isModalSparepartOpen, setIsModalSparepartOpen] = useState(false);
-  const [activeServiceForSparepart, setActiveServiceForSparepart] = useState(null);
-  const [sparepartData, setSparepartData] = useState({ sumber: "Stok Konter", detail: "", modal: "", stokId: "" });
-  const [printData, setPrintData] = useState(null);
-  const [newStok, setNewStok] = useState({ nama: "", qty: 0, harga: 0, jenis: "Sparepart" });
-
-  // State Kamera & Lokasi
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [absenActionType, setAbsenActionType] = useState("");
-  const [currentLocation, setCurrentLocation] = useState(null);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-
-  // --- FIREBASE INIT ---
+  // --- Auth & Init ---
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -120,509 +39,629 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (err) { console.error(err); }
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+    });
     return () => unsubscribe();
   }, []);
 
-  // --- SUBSCRIPTIONS ---
+  // --- Real-time Data Listeners ---
   useEffect(() => {
     if (!user) return;
-    const paths = (coll) => collection(db, 'artifacts', appId, 'public', 'data', coll);
 
-    const unsubServices = onSnapshot(paths('services'), (snap) => {
-      setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.createdTimestamp - a.createdTimestamp));
-      setLoadingDb(false);
-    });
-    const unsubStok = onSnapshot(paths('stok'), (snap) => setStokList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const unsubTeknisi = onSnapshot(paths('teknisi'), (snap) => setTeknisiList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const unsubLogs = onSnapshot(paths('logs'), (snap) => setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp).slice(0, 50)));
-    const unsubAbsensi = onSnapshot(paths('absensi'), (snap) => setAbsensiLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.waktuMasuk - a.waktuMasuk)));
-    const unsubConfig = onSnapshot(paths('config'), (snap) => {
-      snap.docs.forEach(d => {
-        if (d.id === 'konter_profile') setKonterProfile(prev => ({...prev, ...d.data()}));
-        if (d.id === 'security') setAdminPinDB(d.data().adminPin || "1234");
-        if (d.id === 'kasir_session') setKasirSession(d.data());
-      });
-    });
+    const servicesRef = collection(db, 'artifacts', appId, 'public', 'data', 'services');
+    const invRef = collection(db, 'artifacts', appId, 'public', 'data', 'inventory');
+    const attRef = collection(db, 'artifacts', appId, 'public', 'data', 'attendance');
 
-    return () => { unsubServices(); unsubStok(); unsubTeknisi(); unsubLogs(); unsubConfig(); unsubAbsensi(); };
+    const unsubServices = onSnapshot(servicesRef, (s) => {
+      setServices(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("Service sync error", err));
+
+    const unsubInv = onSnapshot(invRef, (s) => {
+      setInventory(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("Inventory sync error", err));
+
+    const unsubAtt = onSnapshot(attRef, (s) => {
+      setAttendance(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("Attendance sync error", err));
+
+    return () => {
+      unsubServices();
+      unsubInv();
+      unsubAtt();
+    };
   }, [user]);
 
-  // --- FUNGSI PEMBANTU ---
-  const formatRp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
-  const getTodayStr = () => new Date().toLocaleDateString('id-ID').replace(/\//g, '-');
-  
-  const logActivity = async (action, detail) => {
-    if (!user) return;
-    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-      user: currentUser || "Guest",
-      role: role || "Guest",
-      action, detail, timestamp: Date.now()
+  // --- Business Logic Helpers ---
+  const handleAddService = async (data) => {
+    const servicesRef = collection(db, 'artifacts', appId, 'public', 'data', 'services');
+    const newService = {
+      ...data,
+      status: 'Proses',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    // Automate Inventory reduction if using store stock
+    if (data.sparepartType === 'stok' && data.sparepartId) {
+      const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', data.sparepartId);
+      await updateDoc(itemRef, { stok: increment(-1) });
+    }
+
+    await addDoc(servicesRef, newService);
+    setCurrentView('services');
+  };
+
+  const handleAttendance = async (photo) => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const attRef = collection(db, 'artifacts', appId, 'public', 'data', 'attendance');
+      await addDoc(attRef, {
+        userId: user.uid,
+        userName: role === 'admin' ? 'Administrator' : 'Teknisi Utama',
+        timestamp: serverTimestamp(),
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        photo: photo || 'https://via.placeholder.com/150'
+      });
+      alert('Absensi Berhasil!');
     });
   };
 
-  const getDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3; // radius bumi dalam meter
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+  const sendWhatsAppReport = () => {
+    const today = new Date().toLocaleDateString();
+    const totalOmset = services.reduce((acc, curr) => acc + (parseInt(curr.biaya) || 0), 0);
+    const message = `*LAPORAN HARIAN GSM KONTERPRO*\nTanggal: ${today}\nTotal Transaksi: ${services.length}\nTotal Omset: Rp ${totalOmset.toLocaleString()}\n\nStatus: Aman.`;
+    window.open(`https://wa.me/6281239107683?text=${encodeURIComponent(message)}`, '_blank');
   };
 
-  // --- HANDLERS ---
-  const handleLogin = () => {
-    if (loginStep === 'admin-login') {
-      if (loginInput.pin === adminPinDB) { setRole('admin'); setCurrentUser('Owner'); logActivity("LOGIN", "Admin masuk"); }
-      else alert("PIN Salah!");
-    } else {
-      const t = teknisiList.find(tk => tk.nama === loginInput.id);
-      if (t && t.pin === loginInput.pin) { setRole('teknisi'); setCurrentUser(t.nama); logActivity("LOGIN", `Teknisi ${t.nama} masuk`); }
-      else alert("PIN Salah!");
-    }
-  };
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white">Memuat GSM KonterPro...</div>;
 
-  const handleStatusUpdate = async (sObj, nextStatus) => {
-    if (nextStatus === "Selesai" && sObj.modalSparepart === 0) {
-      setActiveServiceForSparepart({ ...sObj, targetStatus: nextStatus });
-      setIsModalSparepartOpen(true);
-    } else {
-      const update = { status: nextStatus };
-      if (nextStatus === "Sudah Diambil") update.tglDiambilTimestamp = Date.now();
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', sObj.id), update);
-      logActivity("STATUS", `${sObj.id} -> ${nextStatus}`);
-    }
-  };
+  // --- Views ---
 
-  const handleWhatsApp = (s) => {
-    const msg = `Halo ${s.name}, unit *${s.hp}* Anda di ${konterProfile.nama} statusnya saat ini: *${s.status.toUpperCase()}*. %0A%0AEstimasi Biaya: ${formatRp(s.harga)}%0A%0ATerima kasih.`;
-    window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${msg}`, "_blank");
-  };
+  const LandingPage = () => {
+    const [searchId, setSearchId] = useState('');
+    const [searchResult, setSearchResult] = useState(null);
 
-  const captureAbsen = async () => {
-    // 1. Cek Lokasi
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const dist = getDistance(pos.coords.latitude, pos.coords.longitude, konterProfile.lat, konterProfile.lng);
-      if (dist > konterProfile.radius) {
-        alert(`Anda terlalu jauh dari konter! Jarak: ${Math.round(dist)}m. Maks: ${konterProfile.radius}m.`);
-        return;
-      }
-      setCurrentLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      setIsCameraOpen(true);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    }, () => alert("Gagal mendapatkan lokasi. Aktifkan GPS!"));
-  };
-
-  const submitAbsen = async () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 320; canvas.height = 240;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, 320, 240);
-    const photo = canvas.toDataURL('image/jpeg', 0.7);
-    
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    setIsCameraOpen(false);
-
-    const id = `ABS-${currentUser}-${getTodayStr()}`;
-    const data = {
-      teknisi: currentUser,
-      foto: photo,
-      lat: currentLocation.lat,
-      lng: currentLocation.lng,
-      timestamp: Date.now(),
-      tipe: absenActionType
+    const trackHP = () => {
+      const found = services.find(s => s.id.slice(-6).toUpperCase() === searchId.toUpperCase());
+      setSearchResult(found || 'not_found');
     };
 
-    if (absenActionType === 'IN') {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id), { ...data, waktuMasuk: Date.now(), status: 'Hadir', tanggal: getTodayStr() });
-    } else {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id), { waktuPulang: Date.now(), fotoPulang: photo, status: 'Selesai' });
-    }
-    logActivity("ABSEN", `${currentUser} ${absenActionType}`);
-  };
-
-  const handleAddStok = async (e) => {
-    e.preventDefault();
-    const id = `STK-${Date.now().toString().slice(-6)}`;
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', id), newStok);
-    setNewStok({ nama: "", qty: 0, harga: 0, jenis: "Sparepart" });
-    logActivity("STOK", `Tambah ${newStok.nama}`);
-  };
-
-  // --- PERHITUNGAN STATISTIK ---
-  const filteredServices = services.filter(s => 
-    s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.hp.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const stats = services.reduce((acc, s) => {
-    const isToday = s.tglDiambilTimestamp && s.tglDiambilTimestamp >= kasirSession.startTime;
-    if (s.status === "Sudah Diambil") {
-      acc.totalOmzet += s.harga;
-      acc.totalModal += (s.modalSparepart || 0);
-      if (isToday) { acc.hariOmzet += s.harga; acc.hariModal += (s.modalSparepart || 0); }
-    } else if (s.status === "Selesai") { acc.siapAmbil++; acc.piutang += s.harga; }
-    else if (s.status !== "Cancel") { acc.antrean++; }
-    return acc;
-  }, { totalOmzet: 0, totalModal: 0, hariOmzet: 0, hariModal: 0, antrean: 0, siapAmbil: 0, piutang: 0 });
-
-  // --- RENDER LOGIN ---
-  if (!role) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      {loginStep === "portal-selection" && (
-        <div className="w-full max-w-sm animate-in zoom-in duration-300">
-          <SgmLogo className="h-10 mx-auto mb-10" />
-          <div className="grid gap-4">
-            <button onClick={() => setRole('customer')} className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-100 flex items-center gap-6 active:scale-95 transition-all">
-              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center"><Search size={24}/></div>
-              <div className="text-left"><h3 className="font-black text-slate-800">Pelanggan</h3><p className="text-[10px] text-slate-400 font-bold uppercase">Cek Status Servis</p></div>
-            </button>
-            <button onClick={() => setLoginStep("tech-login")} className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-100 flex items-center gap-6 active:scale-95 transition-all">
-              <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center"><User size={24}/></div>
-              <div className="text-left"><h3 className="font-black text-slate-800">Teknisi</h3><p className="text-[10px] text-slate-400 font-bold uppercase">Absensi & Update Kerja</p></div>
-            </button>
-            <button onClick={() => setLoginStep("admin-login")} className="bg-slate-900 p-6 rounded-[2rem] shadow-xl flex items-center gap-6 active:scale-95 transition-all">
-              <div className="w-12 h-12 bg-white/10 text-white rounded-2xl flex items-center justify-center"><ShieldCheck size={24}/></div>
-              <div className="text-left"><h3 className="font-black text-white">Owner</h3><p className="text-[10px] text-white/40 font-bold uppercase">Laporan Keuangan</p></div>
-            </button>
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
+          <div className="text-center mb-8">
+            <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-200">
+              <Wrench className="text-white w-8 h-8" />
+            </div>
+            <h1 className="text-3xl font-bold text-slate-800">GSM KonterPro</h1>
+            <p className="text-slate-500 mt-2">Solusi perbaikan HP profesional</p>
           </div>
-        </div>
-      )}
 
-      {(loginStep === "tech-login" || loginStep === "admin-login") && (
-        <div className="w-full max-w-sm animate-in slide-in-from-right duration-300">
-          <button onClick={() => setLoginStep("portal-selection")} className="flex items-center gap-2 text-slate-400 font-bold text-xs mb-8"><ChevronLeft size={16}/> KEMBALI</button>
-          <div className={`rounded-[2.5rem] p-10 shadow-2xl ${loginStep === 'admin-login' ? 'bg-slate-900 text-white' : 'bg-white text-slate-800'}`}>
-            <h2 className="text-xl font-black mb-6 text-center">{loginStep === 'admin-login' ? 'Admin Access' : 'Login Teknisi'}</h2>
-            {loginStep === 'tech-login' && !loginInput.id ? (
-              <div className="grid gap-2">
-                {teknisiList.map(t => <button key={t.id} onClick={() => setLoginInput({...loginInput, id: t.nama})} className="p-4 bg-slate-50 text-slate-700 font-bold rounded-2xl">{t.nama}</button>)}
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-3.5 text-slate-400 w-5 h-5" />
+              <input 
+                type="text" 
+                placeholder="Masukkan ID Service (6 Digit Akhir)" 
+                className="w-full pl-10 pr-4 py-3 bg-slate-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none uppercase font-semibold"
+                value={searchId}
+                onChange={(e) => setSearchId(e.target.value)}
+              />
+            </div>
+            <button 
+              onClick={trackHP}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-md"
+            >
+              Lacak Status Perangkat
+            </button>
+
+            {searchResult === 'not_found' && (
+              <div className="p-4 bg-red-50 text-red-600 rounded-lg text-center font-medium animate-pulse">
+                Data tidak ditemukan. Periksa kembali ID Anda.
               </div>
-            ) : (
-              <div>
-                <input type="password" placeholder="PIN" className={`w-full p-4 rounded-2xl text-center text-2xl font-black tracking-[0.5em] mb-4 outline-none ${loginStep === 'admin-login' ? 'bg-white/10 text-white' : 'bg-slate-50'}`} value={loginInput.pin} onChange={e => setLoginInput({...loginInput, pin: e.target.value})} autoFocus />
-                <button onClick={handleLogin} className={`w-full py-4 rounded-2xl font-bold active:scale-95 transition-all ${loginStep === 'admin-login' ? 'bg-white text-slate-900' : 'bg-blue-600 text-white'}`}>MASUK</button>
-                {loginStep === 'tech-login' && <button onClick={() => setLoginInput({id:"", pin:""})} className="w-full mt-4 text-[10px] opacity-40 font-bold uppercase">Bukan saya?</button>}
+            )}
+
+            {searchResult && searchResult !== 'not_found' && (
+              <div className="p-5 border-2 border-blue-100 rounded-xl bg-blue-50">
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-bold text-slate-800 uppercase">{searchResult.namaHP}</h3>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    searchResult.status === 'Selesai' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {searchResult.status}
+                  </span>
+                </div>
+                <div className="text-sm text-slate-600 space-y-1">
+                  <p>Customer: {searchResult.customer}</p>
+                  <p>Kerusakan: {searchResult.kerusakan}</p>
+                  <p className="font-bold text-blue-600">Estimasi: Rp {parseInt(searchResult.biaya).toLocaleString()}</p>
+                </div>
               </div>
             )}
           </div>
+
+          <div className="mt-12 pt-8 border-t border-slate-100">
+            <p className="text-center text-xs text-slate-400 mb-4 uppercase tracking-widest font-bold">Akses Internal</p>
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={() => { setRole('admin'); setCurrentView('dashboard'); }} className="py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-black transition-colors">Login Admin</button>
+              <button onClick={() => { setRole('teknisi'); setCurrentView('services'); }} className="py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">Login Teknisi</button>
+            </div>
+          </div>
         </div>
-      )}
+      </div>
+    );
+  };
+
+  const Sidebar = () => (
+    <div className="w-64 bg-slate-900 h-screen fixed left-0 top-0 text-slate-300 p-4 hidden md:flex flex-col">
+      <div className="flex items-center gap-3 px-2 mb-10">
+        <div className="bg-blue-500 p-2 rounded-lg">
+          <Wrench className="w-6 h-6 text-white" />
+        </div>
+        <span className="text-xl font-bold text-white tracking-tight">KonterPro</span>
+      </div>
+
+      <nav className="flex-1 space-y-2">
+        {role === 'admin' && (
+          <button onClick={() => setCurrentView('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'dashboard' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}>
+            <LayoutDashboard className="w-5 h-5" /> Dashboard
+          </button>
+        )}
+        <button onClick={() => setCurrentView('services')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'services' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}>
+          <ClipboardList className="w-5 h-5" /> Service HP
+        </button>
+        <button onClick={() => setCurrentView('inventory')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'inventory' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}>
+          <Package className="w-5 h-5" /> Stok Sparepart
+        </button>
+        <button onClick={() => setCurrentView('attendance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'attendance' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}>
+          <Camera className="w-5 h-5" /> Absensi GPS
+        </button>
+        {role === 'admin' && (
+          <button onClick={() => setCurrentView('reports')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'reports' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800'}`}>
+            <TrendingUp className="w-5 h-5" /> Laporan Laba
+          </button>
+        )}
+      </nav>
+
+      <div className="pt-4 border-t border-slate-800">
+        <button onClick={() => { setCurrentView('landing'); setRole('guest'); }} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all">
+          <LogOut className="w-5 h-5" /> Keluar
+        </button>
+      </div>
     </div>
   );
 
-  // --- RENDER UTAMA ---
-  return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-24">
-      {/* HEADER */}
-      <header className={`sticky top-0 z-40 px-6 py-4 flex justify-between items-center shadow-lg text-white ${role === 'admin' ? 'bg-slate-900' : 'bg-blue-700'}`}>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center"><SgmLogo className="h-3 invert" /></div>
-          <div><h2 className="text-xs font-black uppercase leading-none">{konterProfile.nama}</h2><p className="text-[10px] opacity-60 font-bold">Halo, {currentUser || 'Guest'}</p></div>
-        </div>
-        <div className="flex gap-2">
-          {role !== 'customer' && <button onClick={() => setIsFormOpen(true)} className="bg-white/20 p-2 rounded-xl"><Plus size={20}/></button>}
-          <button onClick={() => { setRole(null); setLoginStep("portal-selection"); }} className="bg-red-500/80 p-2 rounded-xl"><LogOut size={20}/></button>
-        </div>
-      </header>
+  const DashboardView = () => {
+    const totalOmset = services.reduce((acc, curr) => acc + (parseInt(curr.biaya) || 0), 0);
+    const pendingCount = services.filter(s => s.status !== 'Selesai').length;
+    const lowStock = inventory.filter(i => i.stok < 5).length;
 
-      {/* NAV TABS */}
-      <nav className="sticky top-16 z-30 bg-white border-b px-4 py-3 flex gap-2 overflow-x-auto no-scrollbar">
-        {[
-          { id: "Dashboard", icon: <LayoutDashboard size={14}/> },
-          { id: "Service", icon: <Wrench size={14}/> },
-          ...(role === 'admin' ? [
-            { id: "Stok", icon: <Package size={14}/> },
-            { id: "Logs", icon: <History size={14}/> },
-            { id: "Pengaturan", icon: <Settings size={14}/> }
-          ] : role === 'teknisi' ? [
-            { id: "Absensi", icon: <Clock size={14}/> }
-          ] : [])
-        ].map(item => (
-          <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${activeTab === item.id ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>{item.icon} {item.id}</button>
-        ))}
-      </nav>
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-end">
+          <div>
+            <h2 className="text-3xl font-bold text-slate-800">Dashboard</h2>
+            <p className="text-slate-500">Ringkasan operasional konter hari ini</p>
+          </div>
+          <button 
+            onClick={sendWhatsAppReport}
+            className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-lg shadow-green-100"
+          >
+            <Send className="w-4 h-4" /> Kirim Laporan WA
+          </button>
+        </div>
 
-      {/* MAIN CONTENT */}
-      <main className="p-6 max-w-lg mx-auto w-full">
-        
-        {activeTab === "Dashboard" && (
-          <div className="space-y-6">
-            {role === 'customer' ? (
-              <div className="text-center py-20 bg-white rounded-[2rem] border shadow-sm">
-                <Search size={48} className="mx-auto text-blue-100 mb-6"/>
-                <h2 className="text-xl font-black text-slate-800">Cek Status Servis</h2>
-                <p className="text-xs text-slate-400 mt-2 px-10">Gunakan fitur pencarian di tab <span className="text-blue-600 font-bold">Service</span> untuk melacak unit Anda.</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div className="bg-blue-100 p-4 rounded-xl">
+              <TrendingUp className="w-8 h-8 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-500 font-medium">Total Omset</p>
+              <h3 className="text-2xl font-bold text-slate-800">Rp {totalOmset.toLocaleString()}</h3>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div className="bg-orange-100 p-4 rounded-xl">
+              <Clock className="w-8 h-8 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-500 font-medium">Antrean Service</p>
+              <h3 className="text-2xl font-bold text-slate-800">{pendingCount} Perangkat</h3>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+            <div className="bg-red-100 p-4 rounded-xl">
+              <AlertTriangle className="w-8 h-8 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-500 font-medium">Stok Menipis</p>
+              <h3 className="text-2xl font-bold text-slate-800">{lowStock} Item</h3>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+            <h4 className="font-bold text-slate-800">Antrean Perbaikan Terbaru</h4>
+            <button onClick={() => setCurrentView('services')} className="text-blue-600 text-sm font-semibold hover:underline">Lihat Semua</button>
+          </div>
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider font-bold">
+              <tr>
+                <th className="px-6 py-4">Pelanggan</th>
+                <th className="px-6 py-4">Perangkat</th>
+                <th className="px-6 py-4">Kerusakan</th>
+                <th className="px-6 py-4">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {services.slice(0, 5).map(s => (
+                <tr key={s.id} className="hover:bg-slate-50 transition-colors text-sm">
+                  <td className="px-6 py-4 font-medium text-slate-700">{s.customer}</td>
+                  <td className="px-6 py-4 text-slate-600">{s.namaHP}</td>
+                  <td className="px-6 py-4 text-slate-600">{s.kerusakan}</td>
+                  <td className="px-6 py-4">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      s.status === 'Selesai' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {s.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const ServiceView = () => {
+    const [showModal, setShowModal] = useState(false);
+    const [formData, setFormData] = useState({
+      customer: '', namaHP: '', kerusakan: '', biaya: '', sparepartType: 'stok', sparepartId: '', biayaBeli: 0
+    });
+
+    const onSubmit = (e) => {
+      e.preventDefault();
+      handleAddService(formData);
+      setShowModal(false);
+      setFormData({ customer: '', namaHP: '', kerusakan: '', biaya: '', sparepartType: 'stok', sparepartId: '', biayaBeli: 0 });
+    };
+
+    const updateStatus = async (id, newStatus) => {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'services', id);
+      await updateDoc(docRef, { status: newStatus, updatedAt: serverTimestamp() });
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-3xl font-bold text-slate-800">Manajemen Service</h2>
+          <button 
+            onClick={() => setShowModal(true)}
+            className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all"
+          >
+            <Plus className="w-5 h-5" /> Input Service Baru
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {services.map(s => (
+            <div key={s.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <p className="text-xs font-bold text-blue-500 uppercase tracking-widest mb-1">ID: {s.id.slice(-6)}</p>
+                  <h3 className="text-lg font-bold text-slate-800">{s.namaHP}</h3>
+                </div>
+                <div className={`p-2 rounded-lg ${s.status === 'Selesai' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                  {s.status === 'Selesai' ? <CheckCircle2 className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                </div>
               </div>
-            ) : (
-              <>
-                <div className="bg-gradient-to-br from-blue-600 to-indigo-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden">
-                  <div className="absolute -right-10 -bottom-10 opacity-10"><TrendingUp size={200}/></div>
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">Profit Hari Ini</p>
-                  <h1 className="text-4xl font-black mb-1">{formatRp(stats.hariOmzet - stats.hariModal)}</h1>
-                  <div className="flex justify-between text-[10px] font-bold opacity-70 mt-4 border-t border-white/10 pt-4">
-                    <div><p>OMZET</p><p className="text-sm font-black">{formatRp(stats.hariOmzet)}</p></div>
-                    <div className="text-right"><p>MODAL</p><p className="text-sm font-black">{formatRp(stats.hariModal)}</p></div>
-                  </div>
-                </div>
+              
+              <div className="space-y-2 text-sm text-slate-600 mb-6">
+                <p><span className="font-semibold text-slate-400 mr-2">CUSTOMER:</span> {s.customer}</p>
+                <p><span className="font-semibold text-slate-400 mr-2">MASALAH:</span> {s.kerusakan}</p>
+                <p><span className="font-semibold text-slate-400 mr-2">ESTIMASI:</span> Rp {parseInt(s.biaya).toLocaleString()}</p>
+              </div>
 
+              <div className="flex gap-2">
+                {s.status !== 'Selesai' && (
+                  <button 
+                    onClick={() => updateStatus(s.id, 'Selesai')}
+                    className="flex-1 bg-green-500 text-white py-2 rounded-lg text-sm font-bold hover:bg-green-600 transition-colors"
+                  >
+                    Selesai Perbaikan
+                  </button>
+                )}
+                <button className="px-3 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+                  Detail
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {showModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white w-full max-w-lg rounded-3xl p-8 shadow-2xl animate-in fade-in zoom-in duration-200">
+              <h3 className="text-2xl font-bold text-slate-800 mb-6">Input Data Perbaikan</h3>
+              <form onSubmit={onSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white p-6 rounded-3xl border shadow-sm">
-                    <p className="text-[10px] font-black text-slate-400 mb-2 uppercase">Antrean</p>
-                    <div className="flex items-center justify-between"><span className="text-3xl font-black text-slate-800">{stats.antrean}</span><Clock className="text-orange-400" size={24}/></div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Nama Pelanggan</label>
+                    <input required className="w-full p-3 bg-slate-50 border-0 rounded-xl" placeholder="Contoh: Budi" onChange={e => setFormData({...formData, customer: e.target.value})} />
                   </div>
-                  <div className="bg-white p-6 rounded-3xl border shadow-sm">
-                    <p className="text-[10px] font-black text-slate-400 mb-2 uppercase">Siap Ambil</p>
-                    <div className="flex items-center justify-between"><span className="text-3xl font-black text-slate-800">{stats.siapAmbil}</span><CheckCircle2 className="text-green-400" size={24}/></div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Nama HP/Model</label>
+                    <input required className="w-full p-3 bg-slate-50 border-0 rounded-xl" placeholder="Contoh: iPhone 13" onChange={e => setFormData({...formData, namaHP: e.target.value})} />
                   </div>
                 </div>
-
-                {role === 'admin' && (
-                  <div className="bg-white p-6 rounded-[2rem] border shadow-sm">
-                    <div className="flex items-center gap-2 mb-4"><DollarSign size={18} className="text-blue-600"/><h3 className="font-bold text-slate-800">Total Piutang</h3></div>
-                    <p className="text-2xl font-black text-blue-600">{formatRp(stats.piutang)}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Belum Dibayar Pelanggan</p>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Detail Kerusakan</label>
+                  <textarea required className="w-full p-3 bg-slate-50 border-0 rounded-xl h-24" placeholder="Jelaskan masalah..." onChange={e => setFormData({...formData, kerusakan: e.target.value})}></textarea>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Estimasi Biaya Service</label>
+                    <input type="number" required className="w-full p-3 bg-slate-50 border-0 rounded-xl" placeholder="Rp" onChange={e => setFormData({...formData, biaya: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Sumber Sparepart</label>
+                    <select className="w-full p-3 bg-slate-50 border-0 rounded-xl" onChange={e => setFormData({...formData, sparepartType: e.target.value})}>
+                      <option value="stok">Ambil dari Stok Toko</option>
+                      <option value="beli">Beli Dadakan</option>
+                    </select>
+                  </div>
+                </div>
+                {formData.sparepartType === 'stok' ? (
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Pilih Sparepart (Stok)</label>
+                    <select className="w-full p-3 bg-slate-50 border-0 rounded-xl" onChange={e => setFormData({...formData, sparepartId: e.target.value})}>
+                      <option value="">-- Pilih Barang --</option>
+                      {inventory.map(i => (
+                        <option key={i.id} value={i.id}>{i.nama} (Sisa: {i.stok})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Biaya Beli Sparepart (Dadakan)</label>
+                    <input type="number" className="w-full p-3 bg-slate-50 border-0 rounded-xl" placeholder="Rp" onChange={e => setFormData({...formData, biayaBeli: e.target.value})} />
                   </div>
                 )}
-              </>
-            )}
+                <div className="flex gap-4 mt-8">
+                  <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-3 text-slate-400 font-bold hover:text-slate-600">Batal</button>
+                  <button type="submit" className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700">Simpan Data</button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
+      </div>
+    );
+  };
 
-        {activeTab === "Service" && (
-          <div className="space-y-4">
-            <div className="relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-              <input type="text" placeholder="Cari Nama/HP/Nota..." className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+  const InventoryView = () => {
+    const [showAdd, setShowAdd] = useState(false);
+    const [newItem, setNewItem] = useState({ nama: '', stok: 0, hargaBeli: 0 });
+
+    const handleAdd = async (e) => {
+      e.preventDefault();
+      const invRef = collection(db, 'artifacts', appId, 'public', 'data', 'inventory');
+      await addDoc(invRef, newItem);
+      setShowAdd(false);
+      setNewItem({ nama: '', stok: 0, hargaBeli: 0 });
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-3xl font-bold text-slate-800">Stok Sparepart</h2>
+          <button 
+            onClick={() => setShowAdd(true)}
+            className="bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all"
+          >
+            <Plus className="w-5 h-5" /> Tambah Barang
+          </button>
+        </div>
+
+        {showAdd && (
+          <form onSubmit={handleAdd} className="bg-blue-50 p-6 rounded-2xl border-2 border-blue-100 grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top duration-300">
+            <input required className="p-3 rounded-xl border-0 shadow-sm" placeholder="Nama Barang (LCD, Baterai...)" onChange={e => setNewItem({...newItem, nama: e.target.value})} />
+            <input required type="number" className="p-3 rounded-xl border-0 shadow-sm" placeholder="Jumlah Stok" onChange={e => setNewItem({...newItem, stok: parseInt(e.target.value)})} />
+            <input required type="number" className="p-3 rounded-xl border-0 shadow-sm" placeholder="Harga Modal" onChange={e => setNewItem({...newItem, hargaBeli: parseInt(e.target.value)})} />
+            <div className="flex gap-2">
+              <button type="submit" className="flex-1 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700">Simpan</button>
+              <button type="button" onClick={() => setShowAdd(false)} className="px-4 bg-white text-slate-400 rounded-xl hover:text-red-500">Batal</button>
             </div>
+          </form>
+        )}
 
-            {filteredServices.map(s => (
-              <div key={s.id} className="bg-white rounded-3xl p-5 border shadow-sm flex flex-col gap-4 animate-in slide-in-from-bottom duration-300">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-black text-slate-800 text-lg leading-tight uppercase">{s.hp}</h3>
-                    <p className="text-[10px] font-mono text-slate-400 uppercase tracking-tighter">{s.id} • {s.name}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {inventory.map(item => (
+            <div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <h3 className="font-bold text-slate-800 mb-2">{item.nama}</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <span className={`px-2 py-0.5 rounded text-xs font-bold ${item.stok < 5 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                  STOK: {item.stok}
+                </span>
+                <span className="text-slate-400 text-xs font-medium">Modal: Rp {item.hargaBeli.toLocaleString()}</span>
+              </div>
+              <div className="flex gap-2">
+                <button className="flex-1 py-2 bg-slate-50 text-slate-600 rounded-lg text-sm hover:bg-slate-100">Update Stok</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const AttendanceView = () => {
+    return (
+      <div className="max-w-xl mx-auto space-y-6">
+        <div className="text-center space-y-2">
+          <h2 className="text-3xl font-bold text-slate-800">Absensi Teknisi</h2>
+          <p className="text-slate-500 italic">Validasi GPS & Foto diperlukan sebelum memulai pengerjaan</p>
+        </div>
+
+        <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-xl text-center space-y-8">
+          <div className="w-48 h-48 bg-slate-100 rounded-full mx-auto flex items-center justify-center border-4 border-dashed border-slate-200">
+            <Camera className="w-16 h-16 text-slate-300" />
+          </div>
+          
+          <div className="space-y-4">
+            <button 
+              onClick={() => handleAttendance('https://via.placeholder.com/150')}
+              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-3"
+            >
+              <MapPin className="w-6 h-6" /> Klik Untuk Absensi (GPS)
+            </button>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-widest">Waktu Sekarang: {new Date().toLocaleTimeString()}</p>
+          </div>
+        </div>
+
+        <div className="space-y-4 mt-12">
+          <h4 className="font-bold text-slate-800 px-2">Log Kehadiran Terbaru</h4>
+          <div className="space-y-2">
+            {attendance.slice(0, 5).map(att => (
+              <div key={att.id} className="bg-white p-4 rounded-xl border border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100">
+                    <img src={att.photo} alt="Selfie" className="w-full h-full object-cover" />
                   </div>
-                  <span className={`text-[9px] font-black uppercase px-3 py-1 rounded-full border ${statusColor[s.status]}`}>{s.status}</span>
+                  <div>
+                    <p className="font-bold text-slate-800">{att.userName}</p>
+                    <p className="text-xs text-slate-500 italic">Lokasi: {att.lat.toFixed(4)}, {att.lng.toFixed(4)}</p>
+                  </div>
                 </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100"><p className="text-xs text-slate-600 italic">"{s.keluhan}"</p></div>
-                <div className="flex justify-between items-center">
-                  <div className="text-blue-600 font-black text-lg">{formatRp(s.harga)}</div>
-                  {role !== 'customer' && (
-                    <div className="flex gap-2">
-                      <button onClick={() => handleWhatsApp(s)} className="p-3 bg-green-50 text-green-600 rounded-xl active:scale-90 transition-all"><Send size={18}/></button>
-                      <button onClick={() => setPrintData(s)} className="p-3 bg-slate-100 text-slate-500 rounded-xl active:scale-90 transition-all"><Printer size={18}/></button>
-                      <select value={s.status} onChange={e => handleStatusUpdate(s, e.target.value)} className="bg-slate-900 text-white text-[10px] font-black px-4 py-3 rounded-xl outline-none">
-                        <option value="Masuk">Masuk</option>
-                        <option value="Proses">Proses</option>
-                        <option value="Selesai">Selesai</option>
-                        <option value="Sudah Diambil">Diambil</option>
-                        <option value="Cancel">Cancel</option>
-                      </select>
-                    </div>
-                  )}
+                <div className="text-right">
+                  <p className="text-sm font-medium text-slate-400">Masuk</p>
+                  <p className="text-sm font-bold text-slate-800">{att.timestamp?.toDate().toLocaleTimeString() || '...'}</p>
                 </div>
               </div>
             ))}
           </div>
-        )}
+        </div>
+      </div>
+    );
+  };
 
-        {activeTab === "Absensi" && role === "teknisi" && (
-          <div className="space-y-6">
-            <div className="bg-white p-10 rounded-[2.5rem] border shadow-sm text-center">
-              <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-8 text-blue-600 shadow-inner"><MapPin size={48}/></div>
-              <h2 className="text-xl font-black text-slate-800 mb-2 uppercase">Presensi Kerja</h2>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-10">Validasi GPS & Selfie</p>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => { setAbsenActionType('IN'); captureAbsen(); }} className="py-5 bg-blue-600 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-2 shadow-lg shadow-blue-100 active:scale-95 transition-all"><Camera size={20}/> MASUK</button>
-                <button onClick={() => { setAbsenActionType('OUT'); captureAbsen(); }} className="py-5 bg-slate-900 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-2 active:scale-95 transition-all"><LogOut size={20}/> PULANG</button>
-              </div>
+  const ReportsView = () => {
+    const totalOmset = services.reduce((acc, curr) => acc + (parseInt(curr.biaya) || 0), 0);
+    const totalPengeluaran = services.reduce((acc, curr) => {
+      if (curr.sparepartType === 'beli') return acc + (parseInt(curr.biayaBeli) || 0);
+      if (curr.sparepartType === 'stok') {
+        const item = inventory.find(i => i.id === curr.sparepartId);
+        return acc + (item ? item.hargaBeli : 0);
+      }
+      return acc;
+    }, 0);
+    const labaBersih = totalOmset - totalPengeluaran;
+
+    return (
+      <div className="space-y-8">
+        <div>
+          <h2 className="text-3xl font-bold text-slate-800">Laporan Keuangan Otomatis</h2>
+          <p className="text-slate-500">Ringkasan Omset & Laba Bersih Konter</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Total Omset Kotor</p>
+            <h3 className="text-3xl font-black text-slate-800">Rp {totalOmset.toLocaleString()}</h3>
+            <div className="h-1 bg-blue-500 rounded-full w-full"></div>
+          </div>
+          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Total Pengeluaran</p>
+            <h3 className="text-3xl font-black text-red-500">Rp {totalPengeluaran.toLocaleString()}</h3>
+            <div className="h-1 bg-red-400 rounded-full w-full"></div>
+          </div>
+          <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-2xl space-y-4">
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Laba Bersih</p>
+            <h3 className="text-3xl font-black text-green-400">Rp {labaBersih.toLocaleString()}</h3>
+            <div className="h-1 bg-green-500 rounded-full w-full"></div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden mt-8">
+           <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+            <h4 className="font-bold text-slate-800">Rincian Transaksi Service</h4>
+          </div>
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold">
+              <tr>
+                <th className="px-6 py-4">Nama HP</th>
+                <th className="px-6 py-4 text-right">Omset (A)</th>
+                <th className="px-6 py-4 text-right">Modal Part (B)</th>
+                <th className="px-6 py-4 text-right text-blue-600">Laba (A-B)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {services.map(s => {
+                let modal = 0;
+                if (s.sparepartType === 'beli') modal = parseInt(s.biayaBeli);
+                if (s.sparepartType === 'stok') modal = inventory.find(i => i.id === s.sparepartId)?.hargaBeli || 0;
+                const laba = parseInt(s.biaya) - modal;
+                return (
+                  <tr key={s.id} className="text-sm hover:bg-slate-50">
+                    <td className="px-6 py-4 font-bold">{s.namaHP}</td>
+                    <td className="px-6 py-4 text-right">Rp {parseInt(s.biaya).toLocaleString()}</td>
+                    <td className="px-6 py-4 text-right text-red-500">Rp {modal.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-right font-bold text-green-600">Rp {laba.toLocaleString()}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Main Layout Routing ---
+  if (currentView === 'landing') return <LandingPage />;
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex">
+      <Sidebar />
+      <main className="flex-1 md:ml-64 p-4 md:p-8">
+        {/* Mobile Header */}
+        <div className="md:hidden flex items-center justify-between mb-8">
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-600 p-1.5 rounded-lg text-white">
+              <Wrench size={20} />
             </div>
+            <span className="font-bold text-slate-800">GSM KonterPro</span>
           </div>
-        )}
+          <button onClick={() => setCurrentView('landing')} className="p-2 text-slate-400"><LogOut size={20} /></button>
+        </div>
 
-        {activeTab === "Stok" && role === "admin" && (
-          <div className="space-y-4">
-            <form onSubmit={handleAddStok} className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-3">
-              <h3 className="font-bold text-slate-800 mb-2">Tambah Stok Baru</h3>
-              <input type="text" placeholder="Nama Barang" className="w-full bg-slate-50 p-3 rounded-xl border-none ring-1 ring-slate-100" value={newStok.nama} onChange={e => setNewStok({...newStok, nama: e.target.value})} required/>
-              <div className="grid grid-cols-2 gap-2">
-                <input type="number" placeholder="Qty" className="bg-slate-50 p-3 rounded-xl border-none ring-1 ring-slate-100" value={newStok.qty} onChange={e => setNewStok({...newStok, qty: Number(e.target.value)})} required/>
-                <input type="number" placeholder="Harga Beli" className="bg-slate-50 p-3 rounded-xl border-none ring-1 ring-slate-100 font-bold" value={newStok.harga} onChange={e => setNewStok({...newStok, harga: Number(e.target.value)})} required/>
-              </div>
-              <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold active:scale-95">SIMPAN BARANG</button>
-            </form>
-
-            {stokList.map(item => (
-              <div key={item.id} className="bg-white p-5 rounded-3xl border shadow-sm flex justify-between items-center">
-                <div><h4 className="font-black text-slate-800 leading-tight">{item.nama}</h4><p className="text-xs font-bold text-blue-600">{formatRp(item.harga)}</p></div>
-                <div className="flex items-center gap-4">
-                  <div className="text-right leading-none"><span className="text-2xl font-black">{item.qty}</span><p className="text-[8px] font-bold opacity-30 uppercase">Unit</p></div>
-                  <button onClick={async () => await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', item.id))} className="text-slate-200 hover:text-red-500"><Trash2 size={18}/></button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {activeTab === "Pengaturan" && role === "admin" && (
-          <div className="space-y-6">
-            <div className="bg-white p-8 rounded-[2rem] border shadow-sm space-y-6">
-              <h3 className="font-black text-slate-800 border-b pb-4 uppercase tracking-tighter">Lokasi Konter (GPS)</h3>
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="text-[10px] font-black text-slate-400 ml-2">LATITUDE</label><input type="number" step="any" className="w-full bg-slate-50 p-3 rounded-xl mt-1 border-none ring-1 ring-slate-100 font-mono" value={konterProfile.lat} onChange={e => setKonterProfile({...konterProfile, lat: Number(e.target.value)})} /></div>
-                  <div><label className="text-[10px] font-black text-slate-400 ml-2">LONGITUDE</label><input type="number" step="any" className="w-full bg-slate-50 p-3 rounded-xl mt-1 border-none ring-1 ring-slate-100 font-mono" value={konterProfile.lng} onChange={e => setKonterProfile({...konterProfile, lng: Number(e.target.value)})} /></div>
-                </div>
-                <div><label className="text-[10px] font-black text-slate-400 ml-2">RADIUS ABSENSI (METER)</label><input type="number" className="w-full bg-slate-50 p-3 rounded-xl mt-1 border-none ring-1 ring-slate-100 font-bold" value={konterProfile.radius} onChange={e => setKonterProfile({...konterProfile, radius: Number(e.target.value)})} /></div>
-                <button onClick={async () => {
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'konter_profile'), konterProfile);
-                  alert("Pengaturan Lokasi Disimpan!");
-                }} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 active:scale-95"><Save size={18}/> UPDATE LOKASI</button>
-              </div>
-            </div>
-          </div>
-        )}
-
+        {currentView === 'dashboard' && <DashboardView />}
+        {currentView === 'services' && <ServiceView />}
+        {currentView === 'inventory' && <InventoryView />}
+        {currentView === 'attendance' && <AttendanceView />}
+        {currentView === 'reports' && <ReportsView />}
       </main>
 
-      {/* MODAL KAMERA ABSEN */}
-      {isCameraOpen && (
-        <div className="fixed inset-0 bg-slate-900 z-[110] flex flex-col items-center justify-center p-6">
-          <div className="relative w-full max-w-sm aspect-[3/4] bg-black rounded-[3rem] overflow-hidden shadow-2xl border-4 border-slate-800">
-            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover scale-x-[-1]" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-48 h-64 border-2 border-dashed border-white/30 rounded-full" /></div>
-          </div>
-          <div className="mt-10 flex gap-4">
-            <button onClick={() => { if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop()); setIsCameraOpen(false); }} className="p-6 bg-white/10 text-white rounded-full"><Plus className="rotate-45" size={24}/></button>
-            <button onClick={submitAbsen} className="p-8 bg-blue-600 text-white rounded-full shadow-xl active:scale-90 transition-all"><Camera size={32}/></button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL SPAREPART */}
-      {isModalSparepartOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            let modal = 0; let detail = sparepartData.detail;
-            if (sparepartData.sumber === "Stok Konter") {
-              const itm = stokList.find(i => i.id === sparepartData.stokId);
-              if (!itm || itm.qty <= 0) return alert("Stok Habis!");
-              modal = itm.harga; detail = itm.nama;
-              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', itm.id), { qty: itm.qty - 1 });
-            } else { modal = Number(sparepartData.modal); }
-
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', activeServiceForSparepart.id), {
-              status: activeServiceForSparepart.targetStatus,
-              modalSparepart: modal,
-              detailSparepart: detail
-            });
-            setIsModalSparepartOpen(false);
-          }} className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 shadow-2xl">
-            <h3 className="font-black text-slate-800 mb-6 text-center">Biaya Modal</h3>
-            <div className="space-y-4">
-              <select value={sparepartData.sumber} onChange={e => setSparepartData({...sparepartData, sumber: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl font-bold outline-none ring-1 ring-slate-100">
-                <option value="Stok Konter">Gunakan Stok Toko</option>
-                <option value="Beli Luar">Beli Sendiri</option>
-              </select>
-              {sparepartData.sumber === "Stok Konter" ? (
-                <select required className="w-full bg-slate-50 p-4 rounded-2xl font-bold ring-1 ring-slate-100" value={sparepartData.stokId} onChange={e => setSparepartData({...sparepartData, stokId: e.target.value})}>
-                  <option value="">Pilih Barang...</option>
-                  {stokList.map(i => <option key={i.id} value={i.id}>{i.nama} ({i.qty})</option>)}
-                </select>
-              ) : (
-                <>
-                  <input type="text" placeholder="Detail Sparepart" className="w-full bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-100" onChange={e => setSparepartData({...sparepartData, detail: e.target.value})} required />
-                  <input type="number" placeholder="Harga Beli" className="w-full bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-100 font-bold" onChange={e => setSparepartData({...sparepartData, modal: e.target.value})} required />
-                </>
-              )}
-              <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg">UPDATE SELESAI</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* FORM NOTA BARU */}
-      {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] flex items-center justify-center p-6 overflow-y-auto">
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            const id = `INV-${Date.now().toString().slice(-4)}`;
-            const finalHarga = Number(formData.harga) < 10000 ? Number(formData.harga)*1000 : Number(formData.harga);
-            const data = { ...formData, harga: finalHarga, createdTimestamp: Date.now(), status: "Masuk", modalSparepart: 0 };
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', id), data);
-            setPrintData({ id, ...data });
-            setIsFormOpen(false);
-          }} className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl my-8 animate-in slide-in-from-bottom duration-300">
-            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase tracking-tighter">Nota Servis Baru</h3>
-            <div className="space-y-4">
-              <input type="text" placeholder="Nama Pelanggan" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100" onChange={e => setFormData({...formData, name: e.target.value})} required />
-              <input type="tel" placeholder="WhatsApp (Aktif)" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 font-bold" onChange={e => setFormData({...formData, phone: e.target.value})} required />
-              <input type="text" placeholder="Merk & Tipe HP" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 font-black" onChange={e => setFormData({...formData, hp: e.target.value})} required />
-              <textarea placeholder="Kerusakan / Masalah" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 h-24" onChange={e => setFormData({...formData, keluhan: e.target.value})} required />
-              <div className="grid grid-cols-2 gap-4">
-                <input type="number" placeholder="Est. Biaya" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 font-black text-blue-600" onChange={e => setFormData({...formData, harga: e.target.value})} required />
-                <select className="bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-100 font-bold" onChange={e => setFormData({...formData, teknisi: e.target.value})} required>
-                  <option value="">Pilih Teknisi</option>
-                  {teknisiList.map(t => <option key={t.id} value={t.nama}>{t.nama}</option>)}
-                </select>
-              </div>
-              <button type="submit" className="w-full bg-blue-600 text-white py-5 rounded-[1.5rem] font-black shadow-lg shadow-blue-100 active:scale-95 transition-all mt-4">SIMPAN & CETAK NOTA</button>
-              <button type="button" onClick={() => setIsFormOpen(false)} className="w-full py-2 text-xs font-bold text-slate-400">Batalkan</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* STRUK CETAK (PRINT DATA) */}
-      {printData && (
-        <div className="fixed inset-0 bg-white z-[200] flex flex-col p-8 overflow-y-auto font-mono text-[10px]">
-          <div className="flex justify-between items-center mb-10 no-print">
-            <button onClick={() => setPrintData(null)} className="p-4 bg-slate-100 rounded-full"><Plus size={20} className="rotate-45"/></button>
-            <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2"><Printer size={18}/> CETAK STRUK</button>
-          </div>
-          <div className="w-[58mm] mx-auto text-center border-b border-dashed border-slate-300 pb-4">
-            <h1 className="text-sm font-black uppercase mb-1">{konterProfile.nama}</h1>
-            <p className="opacity-60">CS: {konterProfile.waOwner}</p>
-          </div>
-          <div className="w-[58mm] mx-auto py-4 space-y-2 border-b border-dashed border-slate-300">
-            <div className="flex justify-between"><span>No Nota:</span><span>{printData.id}</span></div>
-            <div className="flex justify-between"><span>Tanggal:</span><span>{new Date(printData.createdTimestamp).toLocaleDateString('id-ID')}</span></div>
-            <div className="flex justify-between"><span>Nama:</span><span>{printData.name}</span></div>
-          </div>
-          <div className="w-[58mm] mx-auto py-4">
-            <p className="font-bold mb-2 uppercase tracking-tighter">Unit: {printData.hp}</p>
-            <p className="opacity-60 italic mb-4">"{printData.keluhan}"</p>
-            <div className="flex justify-between font-black text-sm pt-2 border-t"><span>TOTAL ESTIMASI</span><span>{formatRp(printData.harga)}</span></div>
-          </div>
-          <div className="w-[58mm] mx-auto text-center py-6 opacity-60">
-            <p className="mb-2">SYARAT & KETENTUAN:</p>
-            <p className="leading-tight text-[8px]">Nota adalah bukti sah pengambilan. Barang tidak diambil dalam 30 hari diluar tanggung jawab kami.</p>
-            <p className="mt-4 font-black">TERIMA KASIH</p>
-          </div>
-        </div>
-      )}
-
-      {/* FOOTER */}
-      <footer className="fixed bottom-0 left-0 right-0 py-4 bg-white/80 backdrop-blur-md border-t flex flex-col items-center z-20">
-        <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] mb-1">SGM Pro Counter Manager v3.0</span>
-        <SgmLogo className="h-4 opacity-20 grayscale" />
-      </footer>
-
-      <style dangerouslySetInnerHTML={{__html: `
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        @media print { .no-print { display: none !important; } body { background: white !important; } }
-      `}} />
+      {/* Mobile Bottom Nav */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex justify-between items-center z-40">
+        <button onClick={() => setCurrentView('dashboard')} className={`p-2 ${currentView === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}><LayoutDashboard size={24} /></button>
+        <button onClick={() => setCurrentView('services')} className={`p-2 ${currentView === 'services' ? 'text-blue-600' : 'text-slate-400'}`}><ClipboardList size={24} /></button>
+        <button onClick={() => setCurrentView('inventory')} className={`p-2 ${currentView === 'inventory' ? 'text-blue-600' : 'text-slate-400'}`}><Package size={24} /></button>
+        <button onClick={() => setCurrentView('attendance')} className={`p-2 ${currentView === 'attendance' ? 'text-blue-600' : 'text-slate-400'}`}><Camera size={24} /></button>
+      </div>
     </div>
   );
 }
