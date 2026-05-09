@@ -1,897 +1,226 @@
-import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  signInAnonymously,
-  onAuthStateChanged,
-} from 'firebase/auth';
-import {
-  getFirestore,
-} from 'firebase/firestore';
-
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-
-'use client';
-
-import React, { useState, useEffect, useRef } from "react";
-import {
-  signInAnonymously,
-  onAuthStateChanged,
-} from 'firebase/auth';
-import {
-  collection,
-  onSnapshot,
-  doc,
-  setDoc,
-  deleteDoc,
-  query,
-  addDoc,
-  getDocs
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-
-// ID Unik untuk membedakan data antar konter
-const appId = "SGM-PRO-KONTER-01";
-
-const statusColor = {
-  "Masuk": "bg-gray-200 text-gray-700",
-  "Bongkar": "bg-yellow-100 text-yellow-700",
-  "Menunggu Sparepart": "bg-orange-100 text-orange-700",
-  "Proses": "bg-blue-100 text-blue-700",
-  "Selesai": "bg-green-100 text-green-700",
-  "Sudah Diambil": "bg-teal-100 text-teal-700",
-};
-
-// Komponen Logo SGM
-const SgmLogo = ({ className = "" }) => (
-  <div className={className}>SGM</div>
-);
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [loadingDb, setLoadingDb] = useState(true);
-  const [role, setRole] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [loginInput, setLoginInput] = useState({ id: "", pin: "" });
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loginTargetRole, setLoginTargetRole] = useState("");
-  const [adminPinDB, setAdminPinDB] = useState("konter123");
-
-  const [activeTab, setActiveTab] = useState("Dashboard");
-  const [services, setServices] = useState([]);
-  const [stokList, setStokList] = useState([]);
-  const [teknisiList, setTeknisiList] = useState([]);
-  const [promoList, setPromoList] = useState([]);
-  const [activityLogs, setActivityLogs] = useState([]);
-  const [absensiLogs, setAbsensiLogs] = useState([]);
-  const [kasirSession, setKasirSession] = useState({ 
-    isOpen: true, 
-    startTime: new Date().getTime() 
-  });
-  const [konterLocation, setKonterLocation] = useState(null);
-  const [konterProfile, setKonterProfile] = useState({ 
-    nama: "Toko Gadget", 
-    logoUrl: "", 
-    waOwner: "", 
-    activeUntil: new Date().getTime() + 2592000000 
-  });
-
-  const [customerPhoneLogin, setCustomerPhoneLogin] = useState("");
-  const [savedCustomer, setSavedCustomer] = useState(null);
-  const [customerActiveTab, setCustomerActiveTab] = useState("Status");
-
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [formData, setFormData] = useState({ 
-    name: "", 
-    phone: "", 
-    hp: "", 
-    keluhan: "", 
-    teknisi: "", 
-    status: "Masuk", 
-    harga: "", 
-    garansi: "-" 
-  });
-  const [newStok, setNewStok] = useState({ nama: "", qty: "", harga: "" });
-  const [newTeknisi, setNewTeknisi] = useState({ nama: "", pin: "1234" });
-  const [newPromo, setNewPromo] = useState({ title: "", desc: "", type: "promo" });
-  const [newAdminPin, setNewAdminPin] = useState("");
-
-  const [stats, setStats] = useState({ 
-    omzetHarian: 0, 
-    modalHarian: 0, 
-    omzetTotal: 0, 
-    piutang: 0, 
-    aktif: 0, 
-    selesai: 0, 
-    modalTotal: 0, 
-    labaTotal: 0 
-  });
-
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [absenActionType, setAbsenActionType] = useState("");
-  const [activeAbsenData, setActiveAbsenData] = useState(null);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [stream, setStream] = useState(null);
-
-  const [isModalSparepartOpen, setIsModalSparepartOpen] = useState(false);
-  const [activeServiceForSparepart, setActiveServiceForSparepart] = useState(null);
-  const [sparepartData, setSparepartData] = useState({ 
-    sumber: "Stok Konter", 
-    detail: "", 
-    modal: "", 
-    stokId: "" 
-  });
-
-  // Firebase initialization
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Auth Error:", error);
-      }
-    };
-    initAuth();
-    const unsubscribeAuth = onAuthStateChanged(auth, setUser);
-    return () => unsubscribeAuth();
-  }, []);
-
-  // Real-time listeners
-  useEffect(() => {
-    if (!user) return;
-
-    const collections = {
-      services: collection(db, 'artifacts', appId, 'public', 'data', 'services'),
-      stok: collection(db, 'artifacts', appId, 'public', 'data', 'stok'),
-      teknisi: collection(db, 'artifacts', appId, 'public', 'data', 'teknisi'),
-      promos: collection(db, 'artifacts', appId, 'public', 'data', 'promos'),
-      logs: collection(db, 'artifacts', appId, 'public', 'data', 'logs'),
-      config: collection(db, 'artifacts', appId, 'public', 'data', 'config'),
-      absensi: collection(db, 'artifacts', appId, 'public', 'data', 'absensi')
-    };
-
-    const unsubServices = onSnapshot(query(collections.services), (snapshot) => {
-      setServices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoadingDb(false);
-    });
-
-    const unsubStok = onSnapshot(query(collections.stok), (snapshot) =>
-      setStokList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-    );
-
-    const unsubTeknisi = onSnapshot(query(collections.teknisi), (snapshot) =>
-      setTeknisiList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-    );
-
-    const unsubPromo = onSnapshot(query(collections.promos), (snapshot) =>
-      setPromoList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-    );
-
-    const unsubLogs = onSnapshot(query(collections.logs), (snapshot) => {
-      setActivityLogs(
-        snapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
-          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-          .slice(0, 50)
-      );
-    });
-
-    const unsubAbsensi = onSnapshot(query(collections.absensi), (snapshot) => {
-      setAbsensiLogs(
-        snapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
-          .sort((a, b) => (b.waktuMasuk || 0) - (a.waktuMasuk || 0))
-      );
-    });
-
-    const unsubConfig = onSnapshot(query(collections.config), (snapshot) => {
-      const configData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      const profileInfo = configData.find(c => c.id === 'konter_profile');
-      if (profileInfo) setKonterProfile(profileInfo);
-
-      const securityInfo = configData.find(c => c.id === 'security');
-      if (securityInfo) setAdminPinDB(securityInfo.adminPin);
-
-      const lokasiInfo = configData.find(c => c.id === 'konter_location');
-      if (lokasiInfo) setKonterLocation(lokasiInfo);
-
-      const sessionInfo = configData.find(c => c.id === 'kasir_session');
-      if (sessionInfo) setKasirSession(sessionInfo);
-    });
-
-    return () => {
-      unsubServices();
-      unsubStok();
-      unsubTeknisi();
-      unsubPromo();
-      unsubLogs();
-      unsubConfig();
-      unsubAbsensi();
-    };
-  }, [user]);
-
-  // Utility functions
-  const formatRp = (angka) =>
-    new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0
-    }).format(Number(angka) || 0);
-
-  const formatDate = (timestamp) =>
-    new Date(timestamp).toLocaleString('id-ID', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-  const getTodayDateStr = () => {
-    const d = new Date();
-    return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
-  };
-
-  const generateId = (prefix, list) => {
-    const lastId = list.length > 0
-      ? list.map(i => i.id).sort().reverse()[0]
-      : `${prefix}-000`;
-    
-    let num = 1;
-    if (lastId && lastId.includes("-")) {
-      num = parseInt(lastId.split("-")[1]) + 1;
-    }
-    return `${prefix}-${num.toString().padStart(3, '0')}`;
-  };
-
-  const processHarga = (inputHarga) => {
-    let hargaNum = Number(inputHarga);
-    if (hargaNum > 0 && hargaNum < 100000) {
-      return hargaNum * 1000;
-    }
-    return hargaNum;
-  };
-
-  const logActivity = async (action, detail) => {
-    if (!user) return;
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-        user: currentUser || "Sistem",
-        role: role || "Sistem",
-        action,
-        detail,
-        timestamp: new Date().getTime()
-      });
-    } catch (e) {
-      console.error("Log error:", e);
-    }
-  };
-
-  // Stats calculation
-  useEffect(() => {
-    let tOmzetHarian = 0, tModalHarian = 0, tPiutang = 0, tAktif = 0, tSelesai = 0, tModalTotal = 0, tOmzetTotal = 0;
-    const sessionStart = kasirSession.startTime;
-
-    services.forEach(s => {
-      const modal = Number(s.modalSparepart || 0);
-      const omzet = Number(s.harga || 0);
-
-      if (s.status === "Sudah Diambil") {
-        tOmzetTotal += omzet;
-        tModalTotal += modal;
-        if (s.tglDiambilTimestamp && s.tglDiambilTimestamp >= sessionStart) {
-          tOmzetHarian += omzet;
-          tModalHarian += modal;
-        }
-      } else if (s.status === "Selesai") {
-        tPiutang += omzet;
-        tSelesai++;
-      } else {
-        tAktif++;
-      }
-    });
-
-    setStats({
-      omzetTotal: tOmzetTotal,
-      omzetHarian: tOmzetHarian,
-      modalHarian: tModalHarian,
-      piutang: tPiutang,
-      aktif: tAktif,
-      selesai: tSelesai,
-      modalTotal: tModalTotal,
-      labaTotal: tOmzetTotal - tModalTotal
-    });
-  }, [services, kasirSession]);
-
-  // Handlers
-  const handleTutupKasir = async () => {
-    if (!konterProfile.waOwner) {
-      alert("Atur nomor WA Owner di Pengaturan!");
-      return;
-    }
-    
-    if (!confirm(`Tutup Shift? Omzet: ${formatRp(stats.omzetHarian)}`)) {
-      return;
-    }
-
-    const msg = `*LAPORAN TUTUP SHIFT*%0AOmzet: ${formatRp(stats.omzetHarian)}%0ALaba: ${formatRp(stats.omzetHarian - stats.modalHarian)}`;
-    let wa = konterProfile.waOwner.replace(/\D/g, '');
-    if (wa.startsWith('0')) wa = '62' + wa.substring(1);
-
-    await setDoc(
-      doc(db, 'artifacts', appId, 'public', 'data', 'config', 'kasir_session'),
-      { isOpen: true, startTime: new Date().getTime() }
-    );
-
-    window.open(`https://wa.me/${wa}?text=${msg}`, "_blank");
-  };
-
-  const handleStatusChange = async (sObj, status) => {
-    if (status === "Selesai" && !sObj.modalSparepart) {
-      setActiveServiceForSparepart({ ...sObj, targetStatus: status });
-      setIsModalSparepartOpen(true);
-    } else {
-      const update = { ...sObj, status };
-      if (status === "Sudah Diambil") {
-        update.tglDiambilTimestamp = new Date().getTime();
-      }
-      await setDoc(
-        doc(db, 'artifacts', appId, 'public', 'data', 'services', sObj.id),
-        update
-      );
-      logActivity("UPDATE STATUS", `${sObj.id} -> ${status}`);
-    }
-  };
-
-  const handleAddService = async (e) => {
-    e.preventDefault();
-    const docId = generateId("INV", services);
-    const data = {
-      ...formData,
-      harga: processHarga(formData.harga),
-      tglMasuk: getTodayDateStr(),
-      createdTimestamp: new Date().getTime(),
-      modalSparepart: 0
-    };
-    
-    await setDoc(
-      doc(db, 'artifacts', appId, 'public', 'data', 'services', docId),
-      data
-    );
-    
-    setIsFormOpen(false);
-    setFormData({ name: "", phone: "", hp: "", keluhan: "", teknisi: "", status: "Masuk", harga: "", garansi: "-" });
-    logActivity("BUAT NOTA", docId);
-  };
-
-  const handleSaveSparepart = async (e) => {
-    e.preventDefault();
-    let modal = 0;
-    let detail = sparepartData.detail;
-
-    if (sparepartData.sumber === "Stok Konter") {
-      const itm = stokList.find(i => i.id === sparepartData.stokId);
-      if (!itm || itm.qty < 1) {
-        alert("Stok tidak tersedia!");
-        return;
-      }
-      modal = Number(itm.harga || 0);
-      detail = itm.nama;
-    } else {
-      modal = Number(sparepartData.modal || 0);
-    }
-
-    const updated = { ...activeServiceForSparepart, modalSparepart: modal };
-    await setDoc(
-      doc(db, 'artifacts', appId, 'public', 'data', 'services', activeServiceForSparepart.id),
-      updated
-    );
-
-    setIsModalSparepartOpen(false);
-    setSparepartData({ sumber: "Stok Konter", detail: "", modal: "", stokId: "" });
-    logActivity("TAMBAH SPAREPART", `${activeServiceForSparepart.id}: ${detail}`);
-  };
-
-  const handleOpenCamera = async () => {
-    setIsCameraOpen(true);
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: true });
-      setStream(s);
-      if (videoRef.current) videoRef.current.srcObject = s;
-    } catch (error) {
-      console.error("Camera error:", error);
-      alert("Tidak dapat mengakses kamera");
-    }
-  };
-
-  const takePhoto = () => {
-    if (!videoRef.current) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 300;
-    canvas.height = 400;
-    canvas.getContext('2d')?.drawImage(videoRef.current, 0, 0, 300, 400);
-    const base64 = canvas.toDataURL('image/jpeg');
-
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-    }
-    setIsCameraOpen(false);
-
-    if (absenActionType === "IN") {
-      setDoc(
-        doc(db, 'artifacts', appId, 'public', 'data', 'absensi', `ABS-${currentUser}-${getTodayDateStr()}`),
-        {
-          teknisi: currentUser,
-          tanggal: getTodayDateStr(),
-          waktuMasuk: new Date().getTime(),
-          fotoMasuk: base64
-        }
-      );
-    } else if (activeAbsenData) {
-      setDoc(
-        doc(db, 'artifacts', appId, 'public', 'data', 'absensi', activeAbsenData.id),
-        {
-          ...activeAbsenData,
-          waktuPulang: new Date().getTime(),
-          totalWaktuKerja: new Date().getTime() - activeAbsenData.waktuMasuk,
-          fotoPulang: base64
-        }
-      );
-    }
-  };
-
-  const handleDeleteStokDB = async (stokId) => {
-    if (!confirm("Hapus stok ini?")) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', stokId));
-      logActivity("HAPUS STOK", stokId);
-    } catch (error) {
-      console.error("Delete error:", error);
-    }
-  };
-
-  const initiateLogin = (targetRole, userName = "") => {
-    setLoginTargetRole(targetRole);
-    if (userName) {
-      setCurrentUser(userName);
-      setRole("teknisi");
-      setShowLoginModal(false);
-    } else {
-      setShowLoginModal(true);
-    }
-  };
-
-  if (loadingDb) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <p className="text-lg">Mematangkan Sistem SGM...</p>
-      </div>
-    );
-  }
-
-  // LOGIN VIEW
-  if (!role) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-4 flex flex-col justify-center">
-        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8">
-          <div className="text-center mb-8">
-            <SgmLogo className="text-3xl font-bold text-blue-600 text-center" />
-            <p className="text-gray-600 mt-2">{konterProfile.nama}</p>
-          </div>
-
-          <div className="space-y-3">
-            <button
-              onClick={() => setRole("pelanggan")}
-              className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700"
-            >
-              🔍 Lacak Servisan
-            </button>
-
-            <button
-              onClick={() => initiateLogin("admin")}
-              className="w-full bg-gray-800 text-white py-3 rounded-xl text-sm font-bold hover:bg-gray-900"
-            >
-              Pemilik Konter
-            </button>
-
-            {teknisiList.map(t => (
-              <button
-                key={t.id}
-                onClick={() => initiateLogin("teknisi", t.nama)}
-                className="w-full bg-gray-100 py-2 rounded-xl text-xs font-bold hover:bg-gray-200"
-              >
-                {t.nama}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {showLoginModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-              <h2 className="text-lg font-bold mb-4">Login {loginInput.id || "Admin"}</h2>
-              <input
-                type="password"
-                placeholder="PIN"
-                value={loginInput.pin}
-                onChange={(e) => setLoginInput({ ...loginInput, pin: e.target.value })}
-                className="w-full border p-2 rounded-lg mb-4"
-                autoFocus
-              />
-              <button
-                onClick={() => {
-                  if (loginInput.pin === adminPinDB) {
-                    setRole("admin");
-                    setCurrentUser("Admin");
-                    setShowLoginModal(false);
-                  } else {
-                    alert("PIN salah!");
-                  }
-                }}
-                className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold"
-              >
-                Masuk
-              </button>
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="w-full py-2 text-xs text-gray-400 mt-2"
-              >
-                Batal
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // MAIN APP VIEW
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b p-4">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="text-xl font-bold">{konterProfile.nama}</h1>
-          <div className="flex gap-2">
-            {role === "admin" && (
-              <button
-                onClick={() => setIsFormOpen(true)}
-                className="bg-white text-gray-800 px-3 py-1 rounded-lg text-xs font-bold border"
-              >
-                + Nota
-              </button>
-            )}
-            <button
-              onClick={() => setRole(null)}
-              className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Navigation */}
-      <nav className="bg-white border-b p-4 sticky top-0">
-        <div className="max-w-6xl mx-auto flex gap-2 overflow-x-auto">
-          {["Dashboard", "Service", "Stok", "Pengaturan"].map(n => (
-            <button
-              key={n}
-              onClick={() => setActiveTab(n)}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ${
-                activeTab === n ? 'bg-blue-600 text-white' : 'text-gray-500'
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Content */}
-      <main className="max-w-6xl mx-auto p-4">
-        {/* Dashboard */}
-        {activeTab === "Dashboard" && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-white p-4 rounded-lg shadow">
-                <p className="text-gray-600 text-sm">OMZET SHIFT INI</p>
-                <p className="text-2xl font-bold text-green-600">{formatRp(stats.omzetHarian)}</p>
-              </div>
-              <div className="bg-white p-4 rounded-lg shadow">
-                <p className="text-gray-600 text-sm">ANTREAN</p>
-                <p className="text-2xl font-bold">{stats.aktif}</p>
-              </div>
-              <div className="bg-white p-4 rounded-lg shadow">
-                <p className="text-gray-600 text-sm">SIAP AMBIL</p>
-                <p className="text-2xl font-bold">{stats.selesai}</p>
-              </div>
-              {role === "admin" && (
-                <button
-                  onClick={handleTutupKasir}
-                  className="bg-blue-600 text-white font-bold py-2 rounded-lg text-sm"
-                >
-                  Tutup Buku
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Service */}
-        {activeTab === "Service" && (
-          <div className="space-y-3">
-            {services.filter(s => s.status !== "Sudah Diambil").map(s => (
-              <div key={s.id} className="bg-white p-4 rounded-lg shadow">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-bold">{s.hp} - {s.id}</p>
-                    <p className="text-sm text-gray-600">{s.name}</p>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-sm font-bold ${statusColor[s.status] || 'bg-gray-100'}`}>
-                    {s.status}
-                  </span>
+```html
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGM App - KonterPro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel untuk JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .animate-slide-up { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @media print { .no-print-area { display: none !important; } }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+
+    <script type="module" babel>
+        // --- IMPORT FIREBASE DARI CDN ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, query, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- FIREBASE CONFIG MILIK KAMU ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAnaxWWQRgCJ2BT2LY8quibHBPzgoUS1kE",
+            authDomain: "gsm-app-afe20.firebaseapp.com",
+            projectId: "gsm-app-afe20",
+            storageBucket: "gsm-app-afe20.firebasestorage.app",
+            messagingSenderId: "721664568589",
+            appId: "1:721664568589:web:508d22c640dcea38135444"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "SGM-PRO-KONTER-01";
+
+        const { useState, useEffect, useRef } = React;
+
+        const statusColor = {
+            "Masuk": "bg-gray-200 text-gray-700",
+            "Bongkar": "bg-yellow-100 text-yellow-700",
+            "Menunggu Sparepart": "bg-orange-100 text-orange-700",
+            "Proses": "bg-blue-100 text-blue-700",
+            "Selesai": "bg-green-100 text-green-700",
+            "Sudah Diambil": "bg-teal-100 text-teal-700",
+        };
+
+        const SgmLogo = ({ className = "" }) => (
+            <svg viewBox="0 0 140 40" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="sgmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#0284c7" /><stop offset="50%" stopColor="#0ea5e9" /><stop offset="100%" stopColor="#22d3ee" />
+                    </linearGradient>
+                </defs>
+                <circle cx="20" cy="20" r="16" stroke="url(#sgmGrad)" strokeWidth="3" fill="none" />
+                <text x="45" y="30" fontFamily="Arial" fontWeight="900" fontSize="32" fill="url(#sgmGrad)" fontStyle="italic">SGM</text>
+            </svg>
+        );
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [loadingDb, setLoadingDb] = useState(true);
+            const [role, setRole] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [loginInput, setLoginInput] = useState({ id: "", pin: "" });
+            const [showLoginModal, setShowLoginModal] = useState(false);
+            const [activeTab, setActiveTab] = useState("Dashboard");
+            const [services, setServices] = useState([]);
+            const [stokList, setStokList] = useState([]);
+            const [teknisiList, setTeknisiList] = useState([]);
+            const [promoList, setPromoList] = useState([]);
+            const [konterProfile, setKonterProfile] = useState({ nama: "Toko Gadget", waOwner: "", activeUntil: Date.now() + 2592000000 });
+            const [isFormOpen, setIsFormOpen] = useState(false);
+            const [formData, setFormData] = useState({ name: "", phone: "", hp: "", keluhan: "", teknisi: "", status: "Masuk", harga: "" });
+            const [stats, setStats] = useState({ omzetHarian: 0, aktif: 0, selesai: 0 });
+
+            useEffect(() => {
+                signInAnonymously(auth);
+                onAuthStateChanged(auth, setUser);
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'services'), (snap) => {
+                    setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                    setLoadingDb(false);
+                });
+                onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'stok'), (snap) => setStokList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+                onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'teknisi'), (snap) => setTeknisiList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+                onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'konter_profile'), (snap) => snap.exists() && setKonterProfile(snap.data()));
+                return () => unsub();
+            }, [user]);
+
+            useEffect(() => {
+                const harian = services.filter(s => s.status === "Sudah Diambil").reduce((a, b) => a + (Number(b.harga) || 0), 0);
+                const aktif = services.filter(s => s.status !== "Sudah Diambil" && s.status !== "Selesai").length;
+                const siap = services.filter(s => s.status === "Selesai").length;
+                setStats({ omzetHarian: harian, aktif, selesai: siap });
+            }, [services]);
+
+            const formatRp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
+
+            const handleAddService = async (e) => {
+                e.preventDefault();
+                const id = `INV-${Math.floor(1000 + Math.random() * 9000)}`;
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', id), { ...formData, harga: Number(formData.harga), tglMasuk: new Date().toLocaleDateString() });
+                setIsFormOpen(false);
+            };
+
+            const handleStatus = async (s, val) => {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', s.id), { ...s, status: val, tglDiambilTimestamp: val === "Sudah Diambil" ? Date.now() : null });
+            };
+
+            if (loadingDb) return <div className="h-screen flex items-center justify-center font-bold text-blue-600">SGM App Loading...</div>;
+
+            if (!role) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6">
+                        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
+                            <SgmLogo className="h-12 mx-auto mb-6" />
+                            <h1 className="text-xl font-bold mb-8">{konterProfile.nama}</h1>
+                            <div className="flex flex-col gap-3">
+                                <button onClick={() => setRole("pelanggan")} className="bg-blue-600 text-white font-bold py-4 rounded-xl">Portal Pelanggan</button>
+                                <button onClick={() => { setLoginTargetRole("admin"); setShowLoginModal(true); }} className="bg-gray-800 text-white py-3 rounded-xl text-sm">Masuk Admin</button>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {teknisiList.map(t => <button key={t.id} onClick={() => { setLoginInput({id: t.nama, pin: ""}); setLoginTargetRole("teknisi"); setShowLoginModal(true); }} className="bg-gray-100 py-2 rounded-xl text-xs font-bold">{t.nama}</button>)}
+                                </div>
+                            </div>
+                        </div>
+                        {showLoginModal && (
+                            <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+                                <div className="bg-white p-6 rounded-2xl w-full max-w-xs">
+                                    <h3 className="font-bold mb-4">PIN {loginTargetRole}</h3>
+                                    <input type="password" placeholder="PIN" className="w-full border-2 p-3 rounded-xl text-center mb-4 text-xl" value={loginInput.pin} onChange={e => setLoginInput({...loginInput, pin: e.target.value})} autoFocus />
+                                    <button onClick={() => { if(loginInput.pin === "1234" || loginInput.pin === "konter123") { setRole(loginTargetRole); setCurrentUser(loginInput.id || "Admin"); setShowLoginModal(false); } else { alert("Salah!"); } }} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">Masuk</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            return (
+                <div className="pb-20">
+                    <header className="bg-blue-700 p-4 text-white flex justify-between items-center shadow-md">
+                        <div className="font-bold">{konterProfile.nama}</div>
+                        <div className="flex gap-2">
+                            <button onClick={() => setIsFormOpen(true)} className="bg-white text-blue-700 px-3 py-1 rounded-lg text-xs font-bold">+ Nota</button>
+                            <button onClick={() => setRole(null)} className="bg-red-500 px-3 py-1 rounded-lg text-xs font-bold">Keluar</button>
+                        </div>
+                    </header>
+
+                    <div className="p-4 space-y-4 max-w-md mx-auto">
+                        <div className="bg-gradient-to-br from-blue-600 to-indigo-800 p-6 rounded-3xl text-white shadow-lg">
+                            <div className="text-xs opacity-70">KAS SHIFT INI</div>
+                            <div className="text-3xl font-black">{formatRp(stats.omzetHarian)}</div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-white p-4 rounded-2xl border text-center">
+                                <div className="text-[10px] text-gray-400 font-bold uppercase">Antrean</div>
+                                <div className="text-2xl font-black">{stats.aktif}</div>
+                            </div>
+                            <div className="bg-white p-4 rounded-2xl border text-center">
+                                <div className="text-[10px] text-gray-400 font-bold uppercase">Siap Ambil</div>
+                                <div className="text-2xl font-black">{stats.selesai}</div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <h3 className="font-bold text-gray-700">Daftar Servis Aktif</h3>
+                            {services.filter(s => s.status !== "Sudah Diambil").map(s => (
+                                <div key={s.id} className="bg-white p-4 rounded-2xl border shadow-sm space-y-2">
+                                    <div className="flex justify-between items-start">
+                                        <div><div className="font-bold">{s.hp}</div><div className="text-[10px] text-gray-400">{s.id} | {s.name}</div></div>
+                                        <div className={`text-[10px] px-2 py-1 rounded-full font-bold ${statusColor[s.status]}`}>{s.status}</div>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <div className="text-blue-600 font-black">{formatRp(s.harga)}</div>
+                                        <select value={s.status} onChange={e => handleStatus(s, e.target.value)} className="text-[10px] border p-1 rounded-lg">
+                                            <option value="Masuk">Masuk</option><option value="Proses">Proses</option><option value="Selesai">Selesai</option><option value="Sudah Diambil">Diambil</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {isFormOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+                            <form onSubmit={handleAddService} className="bg-white p-6 rounded-3xl w-full max-w-sm space-y-3 animate-slide-up">
+                                <h3 className="font-bold">Nota Baru</h3>
+                                <input type="text" placeholder="Nama Pelanggan" className="w-full border p-2 rounded-lg" onChange={e => setFormData({...formData, name: e.target.value})} required />
+                                <input type="text" placeholder="Tipe HP" className="w-full border p-2 rounded-lg" onChange={e => setFormData({...formData, hp: e.target.value})} required />
+                                <input type="number" placeholder="Biaya" className="w-full border p-2 rounded-lg" onChange={e => setFormData({...formData, harga: e.target.value})} required />
+                                <button className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl">Simpan</button>
+                                <button type="button" onClick={() => setIsFormOpen(false)} className="w-full text-xs text-gray-400">Batal</button>
+                            </form>
+                        </div>
+                    )}
+
+                    <footer className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t flex flex-col items-center">
+                        <span className="text-[8px] font-bold text-gray-300 uppercase tracking-widest mb-1">Licensed to SGM Group</span>
+                        <SgmLogo className="h-4 opacity-30" />
+                    </footer>
                 </div>
-                <p className="text-sm text-gray-700 mb-2">"{s.keluhan}"</p>
-                <div className="flex justify-between items-center">
-                  <p className="font-bold text-green-600">{formatRp(s.harga)}</p>
-                  {role === "admin" && (
-                    <select
-                      value={s.status}
-                      onChange={(e) => handleStatusChange(s, e.target.value)}
-                      className="text-xs border p-1 rounded-lg font-bold"
-                    >
-                      <option>Masuk</option>
-                      <option>Bongkar</option>
-                      <option>Proses</option>
-                      <option>Selesai</option>
-                      <option>Sudah Diambil</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+            );
+        }
 
-        {/* Stok */}
-        {activeTab === "Stok" && role === "admin" && (
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded-lg shadow">
-              <h3 className="font-bold mb-3">Tambah Stok</h3>
-              <form className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="Nama Barang"
-                  value={newStok.nama}
-                  onChange={(e) => setNewStok({ ...newStok, nama: e.target.value })}
-                  className="w-full border p-2 rounded-lg text-sm"
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Qty"
-                  value={newStok.qty}
-                  onChange={(e) => setNewStok({ ...newStok, qty: e.target.value })}
-                  className="w-full border p-2 rounded-lg text-sm"
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Harga"
-                  value={newStok.harga}
-                  onChange={(e) => setNewStok({ ...newStok, harga: e.target.value })}
-                  className="w-full border p-2 rounded-lg text-sm"
-                  required
-                />
-                <button className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm">
-                  Simpan Stok
-                </button>
-              </form>
-            </div>
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>
 
-            <div className="space-y-2">
-              {stokList.map(item => (
-                <div key={item.id} className="bg-white p-3 rounded-lg shadow flex justify-between items-center">
-                  <div>
-                    <p className="font-bold">{item.nama}</p>
-                    <p className="text-sm text-gray-600">{formatRp(item.harga)}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">{item.qty} pcs</span>
-                    <button
-                      onClick={() => handleDeleteStokDB(item.id)}
-                      className="text-red-600 font-bold"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Pengaturan */}
-        {activeTab === "Pengaturan" && role === "admin" && (
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded-lg shadow">
-              <h3 className="font-bold mb-3">Profil Konter</h3>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="Nama Konter"
-                  value={konterProfile.nama}
-                  onChange={(e) => setKonterProfile({ ...konterProfile, nama: e.target.value })}
-                  className="w-full border p-2 rounded-lg text-sm"
-                />
-                <input
-                  type="text"
-                  placeholder="No WA Owner"
-                  value={konterProfile.waOwner}
-                  onChange={(e) => setKonterProfile({ ...konterProfile, waOwner: e.target.value })}
-                  className="w-full border p-2 rounded-lg text-sm"
-                />
-                <button className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm">
-                  Simpan Profil
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* Modal Sparepart */}
-      {isModalSparepartOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <h2 className="text-lg font-bold mb-4">Input Modal Perbaikan</h2>
-            <select
-              value={sparepartData.sumber}
-              onChange={(e) => setSparepartData({ ...sparepartData, sumber: e.target.value })}
-              className="w-full border p-2 rounded-lg mb-3 text-sm font-bold"
-            >
-              <option>Ambil Stok Toko</option>
-              <option>Beli Luar (Manual)</option>
-            </select>
-
-            {sparepartData.sumber === "Stok Konter" ? (
-              <select
-                value={sparepartData.stokId}
-                onChange={(e) => setSparepartData({ ...sparepartData, stokId: e.target.value })}
-                className="w-full border p-2 rounded-lg mb-3 text-sm"
-              >
-                <option value="">Pilih Stok</option>
-                {stokList.map(i => (
-                  <option key={i.id} value={i.id}>
-                    {i.nama} (Sisa {i.qty})
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <>
-                <input
-                  type="text"
-                  placeholder="Detail Sparepart"
-                  value={sparepartData.detail}
-                  onChange={(e) => setSparepartData({ ...sparepartData, detail: e.target.value })}
-                  className="w-full border p-2 rounded-lg mb-2 text-sm"
-                />
-                <input
-                  type="number"
-                  placeholder="Modal"
-                  value={sparepartData.modal}
-                  onChange={(e) => setSparepartData({ ...sparepartData, modal: e.target.value })}
-                  className="w-full border p-2 rounded-lg mb-3 text-sm"
-                />
-              </>
-            )}
-
-            <button
-              onClick={handleSaveSparepart}
-              className="w-full bg-green-600 text-white py-2 rounded-lg font-bold text-sm"
-            >
-              Selesaikan Servis
-            </button>
-            <button
-              onClick={() => setIsModalSparepartOpen(false)}
-              className="w-full py-2 text-sm text-gray-400 mt-2"
-            >
-              Batal
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Nota Baru */}
-      {isFormOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-4">Nota Baru</h2>
-            <form onSubmit={handleAddService} className="space-y-2">
-              <input
-                type="text"
-                placeholder="Nama Pelanggan"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full border p-2 rounded-lg text-sm"
-                required
-              />
-              <input
-                type="text"
-                placeholder="No HP Pelanggan"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full border p-2 rounded-lg text-sm"
-                required
-              />
-              <input
-                type="text"
-                placeholder="HP/Device"
-                value={formData.hp}
-                onChange={(e) => setFormData({ ...formData, hp: e.target.value })}
-                className="w-full border p-2 rounded-lg text-sm"
-                required
-              />
-              <textarea
-                placeholder="Keluhan"
-                value={formData.keluhan}
-                onChange={(e) => setFormData({ ...formData, keluhan: e.target.value })}
-                className="w-full border p-2 rounded-lg text-sm"
-                required
-              />
-              <input
-                type="number"
-                placeholder="Harga Perkiraan"
-                value={formData.harga}
-                onChange={(e) => setFormData({ ...formData, harga: e.target.value })}
-                className="w-full border p-2 rounded-lg text-sm"
-                required
-              />
-              <select
-                value={formData.teknisi}
-                onChange={(e) => setFormData({ ...formData, teknisi: e.target.value })}
-                className="w-full border p-2 rounded-lg text-sm"
-              >
-                <option value="">Pilih Teknisi</option>
-                {teknisiList.map(t => (
-                  <option key={t.id} value={t.nama}>{t.nama}</option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm"
-              >
-                Simpan Nota
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="w-full py-2 text-xs text-gray-400"
-              >
-                Batal
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <footer className="text-center text-xs text-gray-400 py-4 mt-8">
-        Licensed to SGM Group
-      </footer>
-    </div>
-  );
-}
+```
