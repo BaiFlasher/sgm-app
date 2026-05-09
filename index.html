@@ -1,49 +1,628 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SGM PRO</title>
+import React, { useState, useEffect, useRef } from "react";
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged, 
+  signInWithCustomToken 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  onSnapshot, 
+  doc, 
+  setDoc, 
+  query, 
+  addDoc, 
+  updateDoc,
+  deleteDoc
+} from 'firebase/firestore';
+import { 
+  Camera, Plus, LogOut, LayoutDashboard, Wrench, Package, Users, 
+  History, Settings, Printer, Save, Clock, CheckCircle2, 
+  AlertCircle, ChevronLeft, User, ShieldCheck, Search, MapPin, 
+  Send, Trash2, Edit3, Smartphone, DollarSign, TrendingUp
+} from "lucide-react";
 
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+// --- KONFIGURASI FIREBASE ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyAnaxWWQRgCJ2BT2LY8quibHBPzgoUS1kE",
+      authDomain: "gsm-app-afe20.firebaseapp.com",
+      projectId: "gsm-app-afe20",
+      storageBucket: "gsm-app-afe20.firebasestorage.app",
+      messagingSenderId: "721664568589",
+      appId: "1:721664568589:web:508d22c640dcea38135444"
+    };
 
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'SGM-PRO-KONTER-01';
 
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+const statusColor = {
+  "Masuk": "bg-gray-100 text-gray-600 border-gray-200",
+  "Bongkar": "bg-yellow-100 text-yellow-700 border-yellow-200",
+  "Menunggu Sparepart": "bg-orange-100 text-orange-700 border-orange-200",
+  "Proses": "bg-blue-100 text-blue-700 border-blue-200",
+  "Selesai": "bg-green-100 text-green-700 border-green-200",
+  "Sudah Diambil": "bg-emerald-600 text-white border-emerald-700",
+  "Cancel": "bg-red-100 text-red-700 border-red-200",
+};
 
-<style>
-body {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    background: #f8fafc;
-}
+// --- KOMPONEN LOGO ---
+const SgmLogo = ({ className = "" }) => (
+  <svg viewBox="0 0 140 40" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="sgmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#0284c7" />
+        <stop offset="50%" stopColor="#0ea5e9" />
+        <stop offset="100%" stopColor="#22d3ee" />
+      </linearGradient>
+    </defs>
+    <circle cx="20" cy="20" r="16" stroke="url(#sgmGrad)" strokeWidth="3" fill="none" strokeDasharray="60 20" />
+    <circle cx="20" cy="20" r="12" stroke="#0ea5e9" strokeWidth="1" fill="none" />
+    <text x="45" y="30" fontFamily="Arial, sans-serif" fontWeight="900" fontSize="32" fill="url(#sgmGrad)" fontStyle="italic" letterSpacing="-2">SGM</text>
+  </svg>
+);
 
-.loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 4px solid #dbeafe;
-    border-top: 4px solid #2563eb;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loadingDb, setLoadingDb] = useState(true);
+  const [activeTab, setActiveTab] = useState("Dashboard");
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  // State Login
+  const [loginStep, setLoginStep] = useState("portal-selection");
+  const [loginInput, setLoginInput] = useState({ id: "", pin: "" });
+  
+  // State Data
+  const [services, setServices] = useState([]);
+  const [stokList, setStokList] = useState([]);
+  const [teknisiList, setTeknisiList] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [absensiLogs, setAbsensiLogs] = useState([]);
+  const [konterProfile, setKonterProfile] = useState({ 
+    nama: "SGM Service Center", 
+    waOwner: "", 
+    lat: -6.2000, 
+    lng: 106.8166, 
+    radius: 100 // meter
+  });
+  const [kasirSession, setKasirSession] = useState({ isOpen: true, startTime: Date.now() });
+  const [adminPinDB, setAdminPinDB] = useState("1234");
 
-@keyframes spin {
-    100% {
-        transform: rotate(360deg);
+  // State UI
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [formData, setFormData] = useState({ name: "", phone: "", hp: "", keluhan: "", teknisi: "", status: "Masuk", harga: "" });
+  const [isModalSparepartOpen, setIsModalSparepartOpen] = useState(false);
+  const [activeServiceForSparepart, setActiveServiceForSparepart] = useState(null);
+  const [sparepartData, setSparepartData] = useState({ sumber: "Stok Konter", detail: "", modal: "", stokId: "" });
+  const [printData, setPrintData] = useState(null);
+  const [newStok, setNewStok] = useState({ nama: "", qty: 0, harga: 0, jenis: "Sparepart" });
+
+  // State Kamera & Lokasi
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [absenActionType, setAbsenActionType] = useState("");
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  // --- FIREBASE INIT ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error(err); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsubscribe();
+  }, []);
+
+  // --- SUBSCRIPTIONS ---
+  useEffect(() => {
+    if (!user) return;
+    const paths = (coll) => collection(db, 'artifacts', appId, 'public', 'data', coll);
+
+    const unsubServices = onSnapshot(paths('services'), (snap) => {
+      setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.createdTimestamp - a.createdTimestamp));
+      setLoadingDb(false);
+    });
+    const unsubStok = onSnapshot(paths('stok'), (snap) => setStokList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubTeknisi = onSnapshot(paths('teknisi'), (snap) => setTeknisiList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubLogs = onSnapshot(paths('logs'), (snap) => setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp).slice(0, 50)));
+    const unsubAbsensi = onSnapshot(paths('absensi'), (snap) => setAbsensiLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.waktuMasuk - a.waktuMasuk)));
+    const unsubConfig = onSnapshot(paths('config'), (snap) => {
+      snap.docs.forEach(d => {
+        if (d.id === 'konter_profile') setKonterProfile(prev => ({...prev, ...d.data()}));
+        if (d.id === 'security') setAdminPinDB(d.data().adminPin || "1234");
+        if (d.id === 'kasir_session') setKasirSession(d.data());
+      });
+    });
+
+    return () => { unsubServices(); unsubStok(); unsubTeknisi(); unsubLogs(); unsubConfig(); unsubAbsensi(); };
+  }, [user]);
+
+  // --- FUNGSI PEMBANTU ---
+  const formatRp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
+  const getTodayStr = () => new Date().toLocaleDateString('id-ID').replace(/\//g, '-');
+  
+  const logActivity = async (action, detail) => {
+    if (!user) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
+      user: currentUser || "Guest",
+      role: role || "Guest",
+      action, detail, timestamp: Date.now()
+    });
+  };
+
+  const getDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // radius bumi dalam meter
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // --- HANDLERS ---
+  const handleLogin = () => {
+    if (loginStep === 'admin-login') {
+      if (loginInput.pin === adminPinDB) { setRole('admin'); setCurrentUser('Owner'); logActivity("LOGIN", "Admin masuk"); }
+      else alert("PIN Salah!");
+    } else {
+      const t = teknisiList.find(tk => tk.nama === loginInput.id);
+      if (t && t.pin === loginInput.pin) { setRole('teknisi'); setCurrentUser(t.nama); logActivity("LOGIN", `Teknisi ${t.nama} masuk`); }
+      else alert("PIN Salah!");
     }
+  };
+
+  const handleStatusUpdate = async (sObj, nextStatus) => {
+    if (nextStatus === "Selesai" && sObj.modalSparepart === 0) {
+      setActiveServiceForSparepart({ ...sObj, targetStatus: nextStatus });
+      setIsModalSparepartOpen(true);
+    } else {
+      const update = { status: nextStatus };
+      if (nextStatus === "Sudah Diambil") update.tglDiambilTimestamp = Date.now();
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', sObj.id), update);
+      logActivity("STATUS", `${sObj.id} -> ${nextStatus}`);
+    }
+  };
+
+  const handleWhatsApp = (s) => {
+    const msg = `Halo ${s.name}, unit *${s.hp}* Anda di ${konterProfile.nama} statusnya saat ini: *${s.status.toUpperCase()}*. %0A%0AEstimasi Biaya: ${formatRp(s.harga)}%0A%0ATerima kasih.`;
+    window.open(`https://wa.me/${s.phone.replace(/\D/g,'')}?text=${msg}`, "_blank");
+  };
+
+  const captureAbsen = async () => {
+    // 1. Cek Lokasi
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const dist = getDistance(pos.coords.latitude, pos.coords.longitude, konterProfile.lat, konterProfile.lng);
+      if (dist > konterProfile.radius) {
+        alert(`Anda terlalu jauh dari konter! Jarak: ${Math.round(dist)}m. Maks: ${konterProfile.radius}m.`);
+        return;
+      }
+      setCurrentLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      setIsCameraOpen(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    }, () => alert("Gagal mendapatkan lokasi. Aktifkan GPS!"));
+  };
+
+  const submitAbsen = async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 240;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, 320, 240);
+    const photo = canvas.toDataURL('image/jpeg', 0.7);
+    
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    setIsCameraOpen(false);
+
+    const id = `ABS-${currentUser}-${getTodayStr()}`;
+    const data = {
+      teknisi: currentUser,
+      foto: photo,
+      lat: currentLocation.lat,
+      lng: currentLocation.lng,
+      timestamp: Date.now(),
+      tipe: absenActionType
+    };
+
+    if (absenActionType === 'IN') {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id), { ...data, waktuMasuk: Date.now(), status: 'Hadir', tanggal: getTodayStr() });
+    } else {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id), { waktuPulang: Date.now(), fotoPulang: photo, status: 'Selesai' });
+    }
+    logActivity("ABSEN", `${currentUser} ${absenActionType}`);
+  };
+
+  const handleAddStok = async (e) => {
+    e.preventDefault();
+    const id = `STK-${Date.now().toString().slice(-6)}`;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', id), newStok);
+    setNewStok({ nama: "", qty: 0, harga: 0, jenis: "Sparepart" });
+    logActivity("STOK", `Tambah ${newStok.nama}`);
+  };
+
+  // --- PERHITUNGAN STATISTIK ---
+  const filteredServices = services.filter(s => 
+    s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.hp.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const stats = services.reduce((acc, s) => {
+    const isToday = s.tglDiambilTimestamp && s.tglDiambilTimestamp >= kasirSession.startTime;
+    if (s.status === "Sudah Diambil") {
+      acc.totalOmzet += s.harga;
+      acc.totalModal += (s.modalSparepart || 0);
+      if (isToday) { acc.hariOmzet += s.harga; acc.hariModal += (s.modalSparepart || 0); }
+    } else if (s.status === "Selesai") { acc.siapAmbil++; acc.piutang += s.harga; }
+    else if (s.status !== "Cancel") { acc.antrean++; }
+    return acc;
+  }, { totalOmzet: 0, totalModal: 0, hariOmzet: 0, hariModal: 0, antrean: 0, siapAmbil: 0, piutang: 0 });
+
+  // --- RENDER LOGIN ---
+  if (!role) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+      {loginStep === "portal-selection" && (
+        <div className="w-full max-w-sm animate-in zoom-in duration-300">
+          <SgmLogo className="h-10 mx-auto mb-10" />
+          <div className="grid gap-4">
+            <button onClick={() => setRole('customer')} className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-100 flex items-center gap-6 active:scale-95 transition-all">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center"><Search size={24}/></div>
+              <div className="text-left"><h3 className="font-black text-slate-800">Pelanggan</h3><p className="text-[10px] text-slate-400 font-bold uppercase">Cek Status Servis</p></div>
+            </button>
+            <button onClick={() => setLoginStep("tech-login")} className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-100 flex items-center gap-6 active:scale-95 transition-all">
+              <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center"><User size={24}/></div>
+              <div className="text-left"><h3 className="font-black text-slate-800">Teknisi</h3><p className="text-[10px] text-slate-400 font-bold uppercase">Absensi & Update Kerja</p></div>
+            </button>
+            <button onClick={() => setLoginStep("admin-login")} className="bg-slate-900 p-6 rounded-[2rem] shadow-xl flex items-center gap-6 active:scale-95 transition-all">
+              <div className="w-12 h-12 bg-white/10 text-white rounded-2xl flex items-center justify-center"><ShieldCheck size={24}/></div>
+              <div className="text-left"><h3 className="font-black text-white">Owner</h3><p className="text-[10px] text-white/40 font-bold uppercase">Laporan Keuangan</p></div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(loginStep === "tech-login" || loginStep === "admin-login") && (
+        <div className="w-full max-w-sm animate-in slide-in-from-right duration-300">
+          <button onClick={() => setLoginStep("portal-selection")} className="flex items-center gap-2 text-slate-400 font-bold text-xs mb-8"><ChevronLeft size={16}/> KEMBALI</button>
+          <div className={`rounded-[2.5rem] p-10 shadow-2xl ${loginStep === 'admin-login' ? 'bg-slate-900 text-white' : 'bg-white text-slate-800'}`}>
+            <h2 className="text-xl font-black mb-6 text-center">{loginStep === 'admin-login' ? 'Admin Access' : 'Login Teknisi'}</h2>
+            {loginStep === 'tech-login' && !loginInput.id ? (
+              <div className="grid gap-2">
+                {teknisiList.map(t => <button key={t.id} onClick={() => setLoginInput({...loginInput, id: t.nama})} className="p-4 bg-slate-50 text-slate-700 font-bold rounded-2xl">{t.nama}</button>)}
+              </div>
+            ) : (
+              <div>
+                <input type="password" placeholder="PIN" className={`w-full p-4 rounded-2xl text-center text-2xl font-black tracking-[0.5em] mb-4 outline-none ${loginStep === 'admin-login' ? 'bg-white/10 text-white' : 'bg-slate-50'}`} value={loginInput.pin} onChange={e => setLoginInput({...loginInput, pin: e.target.value})} autoFocus />
+                <button onClick={handleLogin} className={`w-full py-4 rounded-2xl font-bold active:scale-95 transition-all ${loginStep === 'admin-login' ? 'bg-white text-slate-900' : 'bg-blue-600 text-white'}`}>MASUK</button>
+                {loginStep === 'tech-login' && <button onClick={() => setLoginInput({id:"", pin:""})} className="w-full mt-4 text-[10px] opacity-40 font-bold uppercase">Bukan saya?</button>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // --- RENDER UTAMA ---
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans pb-24">
+      {/* HEADER */}
+      <header className={`sticky top-0 z-40 px-6 py-4 flex justify-between items-center shadow-lg text-white ${role === 'admin' ? 'bg-slate-900' : 'bg-blue-700'}`}>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center"><SgmLogo className="h-3 invert" /></div>
+          <div><h2 className="text-xs font-black uppercase leading-none">{konterProfile.nama}</h2><p className="text-[10px] opacity-60 font-bold">Halo, {currentUser || 'Guest'}</p></div>
+        </div>
+        <div className="flex gap-2">
+          {role !== 'customer' && <button onClick={() => setIsFormOpen(true)} className="bg-white/20 p-2 rounded-xl"><Plus size={20}/></button>}
+          <button onClick={() => { setRole(null); setLoginStep("portal-selection"); }} className="bg-red-500/80 p-2 rounded-xl"><LogOut size={20}/></button>
+        </div>
+      </header>
+
+      {/* NAV TABS */}
+      <nav className="sticky top-16 z-30 bg-white border-b px-4 py-3 flex gap-2 overflow-x-auto no-scrollbar">
+        {[
+          { id: "Dashboard", icon: <LayoutDashboard size={14}/> },
+          { id: "Service", icon: <Wrench size={14}/> },
+          ...(role === 'admin' ? [
+            { id: "Stok", icon: <Package size={14}/> },
+            { id: "Logs", icon: <History size={14}/> },
+            { id: "Pengaturan", icon: <Settings size={14}/> }
+          ] : role === 'teknisi' ? [
+            { id: "Absensi", icon: <Clock size={14}/> }
+          ] : [])
+        ].map(item => (
+          <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${activeTab === item.id ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>{item.icon} {item.id}</button>
+        ))}
+      </nav>
+
+      {/* MAIN CONTENT */}
+      <main className="p-6 max-w-lg mx-auto w-full">
+        
+        {activeTab === "Dashboard" && (
+          <div className="space-y-6">
+            {role === 'customer' ? (
+              <div className="text-center py-20 bg-white rounded-[2rem] border shadow-sm">
+                <Search size={48} className="mx-auto text-blue-100 mb-6"/>
+                <h2 className="text-xl font-black text-slate-800">Cek Status Servis</h2>
+                <p className="text-xs text-slate-400 mt-2 px-10">Gunakan fitur pencarian di tab <span className="text-blue-600 font-bold">Service</span> untuk melacak unit Anda.</p>
+              </div>
+            ) : (
+              <>
+                <div className="bg-gradient-to-br from-blue-600 to-indigo-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden">
+                  <div className="absolute -right-10 -bottom-10 opacity-10"><TrendingUp size={200}/></div>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">Profit Hari Ini</p>
+                  <h1 className="text-4xl font-black mb-1">{formatRp(stats.hariOmzet - stats.hariModal)}</h1>
+                  <div className="flex justify-between text-[10px] font-bold opacity-70 mt-4 border-t border-white/10 pt-4">
+                    <div><p>OMZET</p><p className="text-sm font-black">{formatRp(stats.hariOmzet)}</p></div>
+                    <div className="text-right"><p>MODAL</p><p className="text-sm font-black">{formatRp(stats.hariModal)}</p></div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white p-6 rounded-3xl border shadow-sm">
+                    <p className="text-[10px] font-black text-slate-400 mb-2 uppercase">Antrean</p>
+                    <div className="flex items-center justify-between"><span className="text-3xl font-black text-slate-800">{stats.antrean}</span><Clock className="text-orange-400" size={24}/></div>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border shadow-sm">
+                    <p className="text-[10px] font-black text-slate-400 mb-2 uppercase">Siap Ambil</p>
+                    <div className="flex items-center justify-between"><span className="text-3xl font-black text-slate-800">{stats.siapAmbil}</span><CheckCircle2 className="text-green-400" size={24}/></div>
+                  </div>
+                </div>
+
+                {role === 'admin' && (
+                  <div className="bg-white p-6 rounded-[2rem] border shadow-sm">
+                    <div className="flex items-center gap-2 mb-4"><DollarSign size={18} className="text-blue-600"/><h3 className="font-bold text-slate-800">Total Piutang</h3></div>
+                    <p className="text-2xl font-black text-blue-600">{formatRp(stats.piutang)}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Belum Dibayar Pelanggan</p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === "Service" && (
+          <div className="space-y-4">
+            <div className="relative group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+              <input type="text" placeholder="Cari Nama/HP/Nota..." className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            </div>
+
+            {filteredServices.map(s => (
+              <div key={s.id} className="bg-white rounded-3xl p-5 border shadow-sm flex flex-col gap-4 animate-in slide-in-from-bottom duration-300">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-black text-slate-800 text-lg leading-tight uppercase">{s.hp}</h3>
+                    <p className="text-[10px] font-mono text-slate-400 uppercase tracking-tighter">{s.id} • {s.name}</p>
+                  </div>
+                  <span className={`text-[9px] font-black uppercase px-3 py-1 rounded-full border ${statusColor[s.status]}`}>{s.status}</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100"><p className="text-xs text-slate-600 italic">"{s.keluhan}"</p></div>
+                <div className="flex justify-between items-center">
+                  <div className="text-blue-600 font-black text-lg">{formatRp(s.harga)}</div>
+                  {role !== 'customer' && (
+                    <div className="flex gap-2">
+                      <button onClick={() => handleWhatsApp(s)} className="p-3 bg-green-50 text-green-600 rounded-xl active:scale-90 transition-all"><Send size={18}/></button>
+                      <button onClick={() => setPrintData(s)} className="p-3 bg-slate-100 text-slate-500 rounded-xl active:scale-90 transition-all"><Printer size={18}/></button>
+                      <select value={s.status} onChange={e => handleStatusUpdate(s, e.target.value)} className="bg-slate-900 text-white text-[10px] font-black px-4 py-3 rounded-xl outline-none">
+                        <option value="Masuk">Masuk</option>
+                        <option value="Proses">Proses</option>
+                        <option value="Selesai">Selesai</option>
+                        <option value="Sudah Diambil">Diambil</option>
+                        <option value="Cancel">Cancel</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeTab === "Absensi" && role === "teknisi" && (
+          <div className="space-y-6">
+            <div className="bg-white p-10 rounded-[2.5rem] border shadow-sm text-center">
+              <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-8 text-blue-600 shadow-inner"><MapPin size={48}/></div>
+              <h2 className="text-xl font-black text-slate-800 mb-2 uppercase">Presensi Kerja</h2>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-10">Validasi GPS & Selfie</p>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => { setAbsenActionType('IN'); captureAbsen(); }} className="py-5 bg-blue-600 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-2 shadow-lg shadow-blue-100 active:scale-95 transition-all"><Camera size={20}/> MASUK</button>
+                <button onClick={() => { setAbsenActionType('OUT'); captureAbsen(); }} className="py-5 bg-slate-900 text-white rounded-[1.5rem] font-black flex items-center justify-center gap-2 active:scale-95 transition-all"><LogOut size={20}/> PULANG</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "Stok" && role === "admin" && (
+          <div className="space-y-4">
+            <form onSubmit={handleAddStok} className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-3">
+              <h3 className="font-bold text-slate-800 mb-2">Tambah Stok Baru</h3>
+              <input type="text" placeholder="Nama Barang" className="w-full bg-slate-50 p-3 rounded-xl border-none ring-1 ring-slate-100" value={newStok.nama} onChange={e => setNewStok({...newStok, nama: e.target.value})} required/>
+              <div className="grid grid-cols-2 gap-2">
+                <input type="number" placeholder="Qty" className="bg-slate-50 p-3 rounded-xl border-none ring-1 ring-slate-100" value={newStok.qty} onChange={e => setNewStok({...newStok, qty: Number(e.target.value)})} required/>
+                <input type="number" placeholder="Harga Beli" className="bg-slate-50 p-3 rounded-xl border-none ring-1 ring-slate-100 font-bold" value={newStok.harga} onChange={e => setNewStok({...newStok, harga: Number(e.target.value)})} required/>
+              </div>
+              <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold active:scale-95">SIMPAN BARANG</button>
+            </form>
+
+            {stokList.map(item => (
+              <div key={item.id} className="bg-white p-5 rounded-3xl border shadow-sm flex justify-between items-center">
+                <div><h4 className="font-black text-slate-800 leading-tight">{item.nama}</h4><p className="text-xs font-bold text-blue-600">{formatRp(item.harga)}</p></div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right leading-none"><span className="text-2xl font-black">{item.qty}</span><p className="text-[8px] font-bold opacity-30 uppercase">Unit</p></div>
+                  <button onClick={async () => await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', item.id))} className="text-slate-200 hover:text-red-500"><Trash2 size={18}/></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeTab === "Pengaturan" && role === "admin" && (
+          <div className="space-y-6">
+            <div className="bg-white p-8 rounded-[2rem] border shadow-sm space-y-6">
+              <h3 className="font-black text-slate-800 border-b pb-4 uppercase tracking-tighter">Lokasi Konter (GPS)</h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className="text-[10px] font-black text-slate-400 ml-2">LATITUDE</label><input type="number" step="any" className="w-full bg-slate-50 p-3 rounded-xl mt-1 border-none ring-1 ring-slate-100 font-mono" value={konterProfile.lat} onChange={e => setKonterProfile({...konterProfile, lat: Number(e.target.value)})} /></div>
+                  <div><label className="text-[10px] font-black text-slate-400 ml-2">LONGITUDE</label><input type="number" step="any" className="w-full bg-slate-50 p-3 rounded-xl mt-1 border-none ring-1 ring-slate-100 font-mono" value={konterProfile.lng} onChange={e => setKonterProfile({...konterProfile, lng: Number(e.target.value)})} /></div>
+                </div>
+                <div><label className="text-[10px] font-black text-slate-400 ml-2">RADIUS ABSENSI (METER)</label><input type="number" className="w-full bg-slate-50 p-3 rounded-xl mt-1 border-none ring-1 ring-slate-100 font-bold" value={konterProfile.radius} onChange={e => setKonterProfile({...konterProfile, radius: Number(e.target.value)})} /></div>
+                <button onClick={async () => {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'konter_profile'), konterProfile);
+                  alert("Pengaturan Lokasi Disimpan!");
+                }} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 active:scale-95"><Save size={18}/> UPDATE LOKASI</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* MODAL KAMERA ABSEN */}
+      {isCameraOpen && (
+        <div className="fixed inset-0 bg-slate-900 z-[110] flex flex-col items-center justify-center p-6">
+          <div className="relative w-full max-w-sm aspect-[3/4] bg-black rounded-[3rem] overflow-hidden shadow-2xl border-4 border-slate-800">
+            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover scale-x-[-1]" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-48 h-64 border-2 border-dashed border-white/30 rounded-full" /></div>
+          </div>
+          <div className="mt-10 flex gap-4">
+            <button onClick={() => { if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop()); setIsCameraOpen(false); }} className="p-6 bg-white/10 text-white rounded-full"><Plus className="rotate-45" size={24}/></button>
+            <button onClick={submitAbsen} className="p-8 bg-blue-600 text-white rounded-full shadow-xl active:scale-90 transition-all"><Camera size={32}/></button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SPAREPART */}
+      {isModalSparepartOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            let modal = 0; let detail = sparepartData.detail;
+            if (sparepartData.sumber === "Stok Konter") {
+              const itm = stokList.find(i => i.id === sparepartData.stokId);
+              if (!itm || itm.qty <= 0) return alert("Stok Habis!");
+              modal = itm.harga; detail = itm.nama;
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'stok', itm.id), { qty: itm.qty - 1 });
+            } else { modal = Number(sparepartData.modal); }
+
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', activeServiceForSparepart.id), {
+              status: activeServiceForSparepart.targetStatus,
+              modalSparepart: modal,
+              detailSparepart: detail
+            });
+            setIsModalSparepartOpen(false);
+          }} className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 shadow-2xl">
+            <h3 className="font-black text-slate-800 mb-6 text-center">Biaya Modal</h3>
+            <div className="space-y-4">
+              <select value={sparepartData.sumber} onChange={e => setSparepartData({...sparepartData, sumber: e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl font-bold outline-none ring-1 ring-slate-100">
+                <option value="Stok Konter">Gunakan Stok Toko</option>
+                <option value="Beli Luar">Beli Sendiri</option>
+              </select>
+              {sparepartData.sumber === "Stok Konter" ? (
+                <select required className="w-full bg-slate-50 p-4 rounded-2xl font-bold ring-1 ring-slate-100" value={sparepartData.stokId} onChange={e => setSparepartData({...sparepartData, stokId: e.target.value})}>
+                  <option value="">Pilih Barang...</option>
+                  {stokList.map(i => <option key={i.id} value={i.id}>{i.nama} ({i.qty})</option>)}
+                </select>
+              ) : (
+                <>
+                  <input type="text" placeholder="Detail Sparepart" className="w-full bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-100" onChange={e => setSparepartData({...sparepartData, detail: e.target.value})} required />
+                  <input type="number" placeholder="Harga Beli" className="w-full bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-100 font-bold" onChange={e => setSparepartData({...sparepartData, modal: e.target.value})} required />
+                </>
+              )}
+              <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg">UPDATE SELESAI</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* FORM NOTA BARU */}
+      {isFormOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] flex items-center justify-center p-6 overflow-y-auto">
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            const id = `INV-${Date.now().toString().slice(-4)}`;
+            const finalHarga = Number(formData.harga) < 10000 ? Number(formData.harga)*1000 : Number(formData.harga);
+            const data = { ...formData, harga: finalHarga, createdTimestamp: Date.now(), status: "Masuk", modalSparepart: 0 };
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', id), data);
+            setPrintData({ id, ...data });
+            setIsFormOpen(false);
+          }} className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl my-8 animate-in slide-in-from-bottom duration-300">
+            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase tracking-tighter">Nota Servis Baru</h3>
+            <div className="space-y-4">
+              <input type="text" placeholder="Nama Pelanggan" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100" onChange={e => setFormData({...formData, name: e.target.value})} required />
+              <input type="tel" placeholder="WhatsApp (Aktif)" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 font-bold" onChange={e => setFormData({...formData, phone: e.target.value})} required />
+              <input type="text" placeholder="Merk & Tipe HP" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 font-black" onChange={e => setFormData({...formData, hp: e.target.value})} required />
+              <textarea placeholder="Kerusakan / Masalah" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 h-24" onChange={e => setFormData({...formData, keluhan: e.target.value})} required />
+              <div className="grid grid-cols-2 gap-4">
+                <input type="number" placeholder="Est. Biaya" className="w-full bg-slate-50 p-4 rounded-2xl border-none ring-1 ring-slate-100 font-black text-blue-600" onChange={e => setFormData({...formData, harga: e.target.value})} required />
+                <select className="bg-slate-50 p-4 rounded-2xl ring-1 ring-slate-100 font-bold" onChange={e => setFormData({...formData, teknisi: e.target.value})} required>
+                  <option value="">Pilih Teknisi</option>
+                  {teknisiList.map(t => <option key={t.id} value={t.nama}>{t.nama}</option>)}
+                </select>
+              </div>
+              <button type="submit" className="w-full bg-blue-600 text-white py-5 rounded-[1.5rem] font-black shadow-lg shadow-blue-100 active:scale-95 transition-all mt-4">SIMPAN & CETAK NOTA</button>
+              <button type="button" onClick={() => setIsFormOpen(false)} className="w-full py-2 text-xs font-bold text-slate-400">Batalkan</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* STRUK CETAK (PRINT DATA) */}
+      {printData && (
+        <div className="fixed inset-0 bg-white z-[200] flex flex-col p-8 overflow-y-auto font-mono text-[10px]">
+          <div className="flex justify-between items-center mb-10 no-print">
+            <button onClick={() => setPrintData(null)} className="p-4 bg-slate-100 rounded-full"><Plus size={20} className="rotate-45"/></button>
+            <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2"><Printer size={18}/> CETAK STRUK</button>
+          </div>
+          <div className="w-[58mm] mx-auto text-center border-b border-dashed border-slate-300 pb-4">
+            <h1 className="text-sm font-black uppercase mb-1">{konterProfile.nama}</h1>
+            <p className="opacity-60">CS: {konterProfile.waOwner}</p>
+          </div>
+          <div className="w-[58mm] mx-auto py-4 space-y-2 border-b border-dashed border-slate-300">
+            <div className="flex justify-between"><span>No Nota:</span><span>{printData.id}</span></div>
+            <div className="flex justify-between"><span>Tanggal:</span><span>{new Date(printData.createdTimestamp).toLocaleDateString('id-ID')}</span></div>
+            <div className="flex justify-between"><span>Nama:</span><span>{printData.name}</span></div>
+          </div>
+          <div className="w-[58mm] mx-auto py-4">
+            <p className="font-bold mb-2 uppercase tracking-tighter">Unit: {printData.hp}</p>
+            <p className="opacity-60 italic mb-4">"{printData.keluhan}"</p>
+            <div className="flex justify-between font-black text-sm pt-2 border-t"><span>TOTAL ESTIMASI</span><span>{formatRp(printData.harga)}</span></div>
+          </div>
+          <div className="w-[58mm] mx-auto text-center py-6 opacity-60">
+            <p className="mb-2">SYARAT & KETENTUAN:</p>
+            <p className="leading-tight text-[8px]">Nota adalah bukti sah pengambilan. Barang tidak diambil dalam 30 hari diluar tanggung jawab kami.</p>
+            <p className="mt-4 font-black">TERIMA KASIH</p>
+          </div>
+        </div>
+      )}
+
+      {/* FOOTER */}
+      <footer className="fixed bottom-0 left-0 right-0 py-4 bg-white/80 backdrop-blur-md border-t flex flex-col items-center z-20">
+        <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] mb-1">SGM Pro Counter Manager v3.0</span>
+        <SgmLogo className="h-4 opacity-20 grayscale" />
+      </footer>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @media print { .no-print { display: none !important; } body { background: white !important; } }
+      `}} />
+    </div>
+  );
 }
-</style>
-</head>
-<body>
-<div id="root"></div>
-
-<script type="text/babel">
-
-const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_AUTH_DOMAIN",
-   
